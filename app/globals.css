@@ -139,6 +139,9 @@ body {
     background-color: var(--border);
     border-radius: 3px;
   }
+
+  /* Animations */
+  .fade-in { animation: fadeIn 0.4s ease forwards; }
 }
 
 /* ── Streaming text animation ───────────────────────────────────────────── */

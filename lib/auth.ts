@@ -22,8 +22,7 @@ const GOOGLE_SCOPES = [
   'openid',
   'email',
   'profile',
-  'https://www.googleapis.com/auth/drive.readonly',
-  'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/drive',   // full read+write; drive.readonly only reads app-created files
   'https://www.googleapis.com/auth/cloud-platform',
 ].join(' ');
 

@@ -7,43 +7,17 @@
  * State: corpusName flows from IndexingPanel → Mode 1 / Mode 2 views.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useSession } from 'next-auth/react';
 
 import { ConnectPage } from '@/components/ConnectPage';
 import { Header } from '@/components/Header';
 import { IndexingPanel } from '@/components/IndexingPanel';
 
-// ── Placeholder for Mode 1 view (built in PASO 4) ────────────────────────────
-function SearchView({ corpusName }: { corpusName: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
-      <div className="card px-5 py-3 text-sm" style={{ borderColor: 'var(--success)' }}>
-        <span style={{ color: 'var(--success)', fontWeight: 600 }}>✓ Corpus ready</span>
-        <span style={{ color: 'var(--text-secondary)', marginLeft: 8, fontSize: '0.75rem' }}>
-          {corpusName.split('/').pop()}
-        </span>
-      </div>
-      <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', maxWidth: 400 }}>
-        <span style={{ color: 'var(--accent)', fontWeight: 600 }}>PASO 4</span> — Conversational search UI coming next.
-      </p>
-    </div>
-  );
-}
-
-// ── Placeholder for Mode 2 view (built in PASO 5) ────────────────────────────
-function ClassifyView({ corpusName }: { corpusName: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center h-full gap-3 text-center px-4">
-      <p style={{ color: 'var(--text-secondary)', fontSize: '0.8rem', maxWidth: 400 }}>
-        <span style={{ color: 'var(--accent)', fontWeight: 600 }}>PASO 5</span> — Reference-based classification UI coming next.
-      </p>
-      <p style={{ color: 'var(--text-secondary)', fontSize: '0.7rem' }}>
-        Corpus: {corpusName.split('/').pop()}
-      </p>
-    </div>
-  );
-}
+import { SearchPanel } from '@/components/SearchPanel';
+import { SettingsPanel } from '@/components/SettingsPanel';
+import { ClassifyView } from '@/components/ClassifyView';
+import { ManageCorpusPanel } from '@/components/ManageCorpusPanel';
 
 type AppMode = 'search' | 'classify';
 
@@ -51,18 +25,24 @@ export default function Home() {
   const { status } = useSession();
   const [mode, setMode] = useState<AppMode>('search');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // corpusName is null until indexing completes (or is restored from session storage)
-  const [corpusName, setCorpusName] = useState<string | null>(() => {
-    if (typeof window !== 'undefined') {
-      return sessionStorage.getItem('corpusName') ?? null;
-    }
-    return null;
-  });
+  const [manageOpen, setManageOpen] = useState(false);
+  const [corpusName, setCorpusName] = useState<string | null>(null);
+
+  // Hydrate from sessionStorage after mount — prevents SSR mismatch
+  useEffect(() => {
+    const saved = sessionStorage.getItem('corpusName');
+    if (saved) setCorpusName(saved);
+  }, []);
 
   function handleIndexingComplete(name: string) {
     setCorpusName(name);
     // Cache in sessionStorage so it survives page refreshes within the tab
     sessionStorage.setItem('corpusName', name);
+  }
+
+  function handleClearCorpus() {
+    setCorpusName(null);
+    sessionStorage.removeItem('corpusName');
   }
 
   // ── Loading spinner ──────────────────────────────────────────────────────
@@ -91,7 +71,7 @@ export default function Home() {
       {/* Mode toggle — only shown when corpus is ready */}
       {corpusName && (
         <div
-          className="flex items-center justify-center px-6 py-3"
+          className="flex flex-col sm:flex-row items-center justify-between px-6 py-3 gap-3"
           style={{ borderBottom: '1px solid var(--border)' }}
         >
           <div
@@ -122,6 +102,25 @@ export default function Home() {
               </button>
             ))}
           </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setManageOpen(true)}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
+              title="Ver y gestionar archivos indexados"
+            >
+              Administrar Índice
+            </button>
+            <button
+              onClick={handleClearCorpus}
+              className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
+              style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
+              title="Indexar otra carpeta de Drive sin borrar la actual"
+            >
+              Cambiar carpeta indexada
+            </button>
+          </div>
         </div>
       )}
 
@@ -131,7 +130,7 @@ export default function Home() {
           /* No corpus yet → show indexing panel */
           <IndexingPanel onIndexingComplete={handleIndexingComplete} />
         ) : mode === 'search' ? (
-          <SearchView corpusName={corpusName} />
+          <SearchPanel corpusName={corpusName} />
         ) : (
           <ClassifyView corpusName={corpusName} />
         )}
@@ -155,10 +154,39 @@ export default function Home() {
                 Close
               </button>
             </div>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>
-              LLM provider and model selection —{' '}
-              <span style={{ color: 'var(--accent)' }}>PASO 3</span>.
-            </p>
+            <SettingsPanel />
+          </aside>
+        </>
+      )}
+
+      {/* Manage Corpus slide-over */}
+      {manageOpen && (
+        <>
+          <div className="slide-over-overlay" onClick={() => setManageOpen(false)} aria-hidden="true" />
+          <aside className="slide-over-panel p-6 flex flex-col">
+            <div className="flex items-center justify-between mb-6 shrink-0">
+              <h2 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
+                Administrar Índice
+              </h2>
+              <button
+                onClick={() => setManageOpen(false)}
+                className="btn-ghost"
+                style={{ padding: '4px 8px', fontSize: '0.75rem' }}
+                aria-label="Close manage panel"
+              >
+                Cerrar
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-hidden">
+              <ManageCorpusPanel
+                onClose={() => setManageOpen(false)}
+                onCorpusDeleted={() => {
+                  setManageOpen(false);
+                  handleClearCorpus();
+                }}
+              />
+            </div>
           </aside>
         </>
       )}

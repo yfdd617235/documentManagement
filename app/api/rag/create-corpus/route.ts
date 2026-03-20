@@ -38,9 +38,12 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
+
     // 1. Check Supabase cache first (fastest path)
     const existing = await getCorpusForUser(userId);
-    if (existing?.corpus_name) {
+    // Only use cache if the corpus actually belongs to the active region!
+    if (existing?.corpus_name && existing.corpus_name.includes(`locations/${location}`)) {
       return NextResponse.json({
         corpusName: existing.corpus_name,
         isNew: false,

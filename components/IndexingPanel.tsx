@@ -122,7 +122,26 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
     });
 
     try {
-      // Step 1 — Grant access
+      // Step 1 — Create or reuse corpus (provisions the Vertex AI service agent)
+      setState((prev) => ({ ...prev, step: 'creating_corpus', progress: 5 }));
+
+      const corpusRes = await fetch('/api/rag/create-corpus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folderId: trimmedId }),
+      });
+      const corpusData = await corpusRes.json();
+
+      if (!corpusRes.ok) {
+        throw new Error(corpusData.message ?? 'Failed to create RAG corpus.');
+      }
+
+      const { corpusName } = corpusData;
+      setState((prev) => ({ ...prev, corpusName, progress: 20 }));
+
+      // Step 2 — Grant access to the now-provisioned service agent
+      setState((prev) => ({ ...prev, step: 'granting', progress: 35 }));
+      
       const grantRes = await fetch('/api/rag/grant-access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -142,23 +161,6 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
         }
         throw new Error(grantData.message ?? 'Failed to grant folder access.');
       }
-
-      // Step 2 — Create or reuse corpus
-      setState((prev) => ({ ...prev, step: 'creating_corpus', progress: 20 }));
-
-      const corpusRes = await fetch('/api/rag/create-corpus', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderId: trimmedId }),
-      });
-      const corpusData = await corpusRes.json();
-
-      if (!corpusRes.ok) {
-        throw new Error(corpusData.message ?? 'Failed to create RAG corpus.');
-      }
-
-      const { corpusName } = corpusData;
-      setState((prev) => ({ ...prev, corpusName, progress: 35 }));
 
       // Step 3 — Start import
       setState((prev) => ({ ...prev, step: 'importing', progress: 40 }));

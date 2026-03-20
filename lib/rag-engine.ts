@@ -13,23 +13,16 @@
 import { VertexAI } from '@google-cloud/vertexai';
 import type { RetrievedChunk, ImportOperationStatus } from '@/types';
 
-// ─── SDK initialization ───────────────────────────────────────────────────────
-
-function getVertexClient() {
-  const project = process.env.GOOGLE_CLOUD_PROJECT_ID;
-  const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
-  if (!project) {
-    throw new Error(
-      'GOOGLE_CLOUD_PROJECT_ID is not set. Check your .env.local file.'
-    );
-  }
-  return new VertexAI({ project, location });
-}
-
-// The RAG service uses a sub-client under vertexai.preview
-function getRagClient() {
-  const vertexai = getVertexClient();
-  return (vertexai as any).preview?.rag ?? (vertexai as any).rag;
+// ─── Shared ADC Token Helper ──────────────────────────────────────────────────
+// Used to get the Application Default Credentials token for REST API calls
+export async function getAdcToken(): Promise<string> {
+  const { GoogleAuth } = await import('google-auth-library');
+  const auth = new GoogleAuth({
+    scopes: 'https://www.googleapis.com/auth/cloud-platform',
+  });
+  const client = await auth.getClient();
+  const tokenResponse = await client.getAccessToken();
+  return tokenResponse.token!;
 }
 
 // ─── Corpus management ────────────────────────────────────────────────────────
@@ -42,40 +35,108 @@ function getRagClient() {
 export async function createCorpus(userId: string): Promise<string> {
   const project = process.env.GOOGLE_CLOUD_PROJECT_ID!;
   const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
-  const rag = getRagClient();
+  const token = await getAdcToken();
 
   const displayName = `doc-intelligence-${userId.replace(/[^a-z0-9]/gi, '_').toLowerCase()}`;
   const embeddingModel = `projects/${project}/locations/${location}/publishers/google/models/text-embedding-005`;
 
-  const corpus = await rag.createCorpus({
-    displayName,
-    ragEmbeddingModelConfig: {
-      vertexPredictionEndpoint: {
-        publisherModel: embeddingModel,
-      },
+  const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/ragCorpora`;
+  
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({
+      displayName,
+      ragEmbeddingModelConfig: {
+        vertexPredictionEndpoint: {
+          endpoint: embeddingModel,
+        },
+      },
+    }),
   });
 
-  return corpus.name as string;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Failed to create corpus: ${err?.error?.message ?? res.statusText}`);
+  }
+
+  const data = await res.json();
+  return data.name;
 }
 
 /**
  * Lists all corpora and finds one whose display name matches the user.
  * Used as fallback when Supabase is not configured.
  */
-export async function findCorpusByDisplayName(
-  userId: string
-): Promise<string | null> {
-  const rag = getRagClient();
+export async function findCorpusByDisplayName(userId: string): Promise<string | null> {
+  const project = process.env.GOOGLE_CLOUD_PROJECT_ID!;
+  const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
+  const token = await getAdcToken();
   const safeName = `doc-intelligence-${userId.replace(/[^a-z0-9]/gi, '_').toLowerCase()}`;
 
+  const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/ragCorpora`;
+
   try {
-    const corpora = await rag.listCorpora();
-    if (!corpora || !Array.isArray(corpora)) return null;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) return null;
+    
+    const data = await res.json();
+    const corpora = data.ragCorpora ?? [];
     const match = corpora.find((c: any) => c.displayName === safeName);
     return match?.name ?? null;
   } catch {
     return null;
+  }
+}
+
+// ─── Corpus Management ────────────────────────────────────────────────────────
+
+/**
+ * Lists all files inside a specific RAG corpus.
+ */
+export async function listRagFiles(corpusName: string): Promise<any[]> {
+  const token = await getAdcToken();
+  const url = `https://${process.env.VERTEX_AI_LOCATION ?? 'us-central1'}-aiplatform.googleapis.com/v1beta1/${corpusName}/ragFiles?pageSize=100`;
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Failed to list RAG files: ${err?.error?.message ?? res.statusText}`);
+  }
+
+  const data = await res.json();
+  return data.ragFiles ?? [];
+}
+
+/**
+ * Deletes a single file from the RAG corpus.
+ * @param ragFileName The full resource name: projects/.../ragCorpora/.../ragFiles/...
+ */
+export async function deleteRagFile(ragFileName: string): Promise<void> {
+  const token = await getAdcToken();
+  const url = `https://${process.env.VERTEX_AI_LOCATION ?? 'us-central1'}-aiplatform.googleapis.com/v1beta1/${ragFileName}`;
+
+  const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Failed to delete RAG file: ${err?.error?.message ?? res.statusText}`);
+  }
+}
+
+/**
+ * Deletes the entire RAG corpus.
+ */
+export async function deleteCorpus(corpusName: string): Promise<void> {
+  const token = await getAdcToken();
+  const url = `https://${process.env.VERTEX_AI_LOCATION ?? 'us-central1'}-aiplatform.googleapis.com/v1beta1/${corpusName}`;
+
+  const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Failed to delete corpus: ${err?.error?.message ?? res.statusText}`);
   }
 }
 
@@ -157,28 +218,59 @@ export async function grantRagAgentDriveAccess(
   const projectNumber = await getProjectNumber();
   const ragServiceAgent = `service-${projectNumber}@gcp-sa-vertex-rag.iam.gserviceaccount.com`;
 
-  // Check if permission already exists
+  // ── Step 1: Verify the folder exists and check if it's a Shared Drive ───────
+  // We use supportsAllDrives=true so we CAN see Shared Drive files (to detect them)
+  const metaRes = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${folderId}` +
+    `?fields=id,name,driveId,mimeType&supportsAllDrives=true`,
+    { headers: { Authorization: `Bearer ${userAccessToken}` } }
+  );
+
+  if (!metaRes.ok) {
+    const err = await metaRes.json().catch(() => ({}));
+    const status = metaRes.status;
+    const msg = err?.error?.message ?? metaRes.statusText;
+
+    if (status === 404) {
+      throw new Error(
+        `Folder not found: "${folderId}". ` +
+        'Possible causes: (1) wrong folder ID — check the URL in Drive, ' +
+        '(2) the folder belongs to a different Google account than the one connected, ' +
+        '(3) the folder has never been shared with anyone. ' +
+        'Make sure you copied the ID from the URL: drive.google.com/drive/folders/[ID]'
+      );
+    }
+    if (status === 403) {
+      throw new Error(
+        `Access denied to folder "${folderId}". ` +
+        'The Google account connected to this app does not have access to that folder.'
+      );
+    }
+    throw new Error(`Drive API error (${status}): ${msg}`);
+  }
+
+  const meta = await metaRes.json();
+
+  // ── Step 2: Reject Shared Drives (not supported by Vertex AI RAG Engine) ────
+  const isSharedDrive = !!meta.driveId || meta.mimeType === 'application/vnd.google-apps.folder' && !!meta.driveId;
+  if (isSharedDrive) {
+    throw new Error(
+      'SHARED_DRIVE_DETECTED: This folder is in a Shared Drive. ' +
+      'Vertex AI RAG Engine does not support Shared Drives — only personal My Drive folders. ' +
+      'Workaround: copy the folder contents to a folder in My Drive, then index that.'
+    );
+  }
+
+  // ── Step 3: Check existing permissions and grant if needed ──────────────────
   const listRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?fields=permissions(emailAddress,role)`,
+    `https://www.googleapis.com/drive/v3/files/${folderId}/permissions` +
+    `?fields=permissions(emailAddress,role)&supportsAllDrives=true`,
     { headers: { Authorization: `Bearer ${userAccessToken}` } }
   );
 
   if (!listRes.ok) {
-    const err = await listRes.json();
-    const msg = err?.error?.message ?? listRes.statusText;
-
-    // Detect Shared Drive
-    if (
-      msg.toLowerCase().includes('teamdrive') ||
-      msg.toLowerCase().includes('shared drive')
-    ) {
-      throw new Error(
-        'SHARED_DRIVE_DETECTED: Vertex AI RAG Engine does not support Shared Drives. ' +
-        'Please use a folder in your personal My Drive. ' +
-        'Workaround: copy the folder to My Drive, then index the copy.'
-      );
-    }
-    throw new Error(`Failed to check folder permissions: ${msg}`);
+    const err = await listRes.json().catch(() => ({}));
+    throw new Error(`Failed to list folder permissions: ${err?.error?.message ?? listRes.statusText}`);
   }
 
   const { permissions } = await listRes.json();
@@ -190,9 +282,9 @@ export async function grantRagAgentDriveAccess(
 
   if (alreadyGranted) return { alreadyGranted: true, agentEmail: ragServiceAgent };
 
-  // Grant Viewer access
+  // Grant Viewer access to RAG service agent
   const createRes = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${folderId}/permissions`,
+    `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?supportsAllDrives=true`,
     {
       method: 'POST',
       headers: {
@@ -208,16 +300,17 @@ export async function grantRagAgentDriveAccess(
   );
 
   if (!createRes.ok) {
-    const err = await createRes.json();
+    const err = await createRes.json().catch(() => ({}));
     const msg = err?.error?.message ?? createRes.statusText;
     throw new Error(
       `Failed to grant Viewer access to RAG service agent (${ragServiceAgent}): ${msg}. ` +
-      'Ensure the folder is in My Drive (not Shared Drive) and you have sharing permissions.'
+      'Ensure you have "Can share" permission on this folder.'
     );
   }
 
   return { alreadyGranted: false, agentEmail: ragServiceAgent };
 }
+
 
 // ─── File import ──────────────────────────────────────────────────────────────
 
@@ -232,28 +325,46 @@ export async function importDriveFolder(
   corpusName: string,
   folderId: string
 ): Promise<string> {
-  const rag = getRagClient();
+  const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
+  const token = await getAdcToken();
 
-  const operation = await rag.importRagFiles({
-    parent: corpusName,
-    importRagFilesConfig: {
-      googleDriveSource: {
-        resourceIds: [
-          {
-            resourceId: folderId,
-            resourceType: 'RESOURCE_TYPE_FOLDER',
-          },
-        ],
-      },
-      ragFileChunkingConfig: {
-        chunkSize: 512,
-        chunkOverlap: 100,
-      },
-      maxEmbeddingRequestsPerMin: 900,
+  const url = `https://${location}-aiplatform.googleapis.com/v1beta1/${corpusName}/ragFiles:import`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
     },
+    body: JSON.stringify({
+      importRagFilesConfig: {
+        googleDriveSource: {
+          resourceIds: [
+            {
+              resourceId: folderId,
+              resourceType: 'RESOURCE_TYPE_FOLDER',
+            },
+          ],
+        },
+        ragFileChunkingConfig: {
+          chunkSize: 512,
+          chunkOverlap: 100,
+        },
+        maxEmbeddingRequestsPerMin: 900,
+      },
+    }),
   });
 
-  return operation.name as string;
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Failed to start import: ${err?.error?.message ?? res.statusText}`);
+  }
+
+  const data = await res.json();
+  const operationName = data.name || data.operation?.name;
+  if (!operationName) throw new Error('Started import but no operation name returned.');
+  
+  return operationName;
 }
 
 // ─── Operation status polling ─────────────────────────────────────────────────
@@ -329,30 +440,56 @@ export async function retrieveContexts(
   topK: number = 5,
   distanceThreshold: number = 0.5
 ): Promise<RetrievedChunk[]> {
-  const rag = getRagClient();
+  const project = process.env.GOOGLE_CLOUD_PROJECT_ID!;
+  const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
+  const token = await getAdcToken();
 
-  const response = await rag.retrieveContexts({
-    vertex_rag_store: {
-      rag_corpora: [corpusName],
-      rag_retrieval_config: {
-        top_k: topK,
-        vector_distance_threshold: distanceThreshold,
+  const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}:retrieveContexts`;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
+
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
       },
-    },
-    query: { text: query },
-  });
+      signal: controller.signal,
+      body: JSON.stringify({
+        vertexRagStore: {
+          ragCorpora: [corpusName],
+          vectorDistanceThreshold: distanceThreshold, // Flat field in vertexRagStore
+        },
+        query: { text: query },
+      }),
+    });
 
-  const contexts = response?.contexts?.contexts ?? [];
+    console.log(`[RAG DEBUG] status=${res.status} corpus=${corpusName} query="${query}"`);
 
-  return contexts.map((ctx: any) => ({
-    text: ctx.text ?? '',
-    file_name:
-      ctx.sourceUri?.split('/').pop() ??
-      ctx.sourceDisplayName ??
-      'Unknown file',
-    drive_url: buildDriveUrl(ctx.sourceUri ?? ''),
-    score: ctx.score ?? ctx.distance ?? undefined,
-  }));
+    console.log(`[RAG DEBUG] status=${res.status} url=${url}`);
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(`Failed to retrieve contexts: ${err?.error?.message ?? res.statusText}`);
+    }
+
+    const data = await res.json();
+    const contexts = data?.contexts?.contexts ?? [];
+
+    return contexts.map((ctx: any) => ({
+      text: ctx.text ?? '',
+      file_name:
+        ctx.sourceUri?.split('/').pop() ??
+        ctx.sourceDisplayName ??
+        'Unknown file',
+      drive_url: buildDriveUrl(ctx.sourceUri ?? ''),
+      score: ctx.score ?? ctx.distance ?? undefined,
+    }));
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
