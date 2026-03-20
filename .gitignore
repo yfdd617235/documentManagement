@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# Next.js build output
+/.next/
+/out/
+
+# Production build
+/build
+
+# Environment variables — NEVER commit actual credentials
+.env.local
+.env.*.local
+.env.production
+# .env.example excluded too — GitHub secret scanner flags OAuth placeholders.
+# See README.md for required env vars.
+.env.example
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/
+
+# Service account credentials — NEVER commit
+credentials/
+*.json.key
+service-account*.json
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Optional: Supabase local dev
+.supabase/
