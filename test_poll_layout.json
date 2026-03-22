@@ -1,0 +1,32 @@
+{
+  "name": "projects/250935347147/locations/europe-west4/ragCorpora/1798062151227670528/operations/3750661623811932160",
+  "metadata": {
+    "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.ImportRagFilesOperationMetadata",
+    "genericMetadata": {
+      "createTime": "2026-03-22T21:10:29.993986Z",
+      "updateTime": "2026-03-22T21:10:36.291033Z"
+    },
+    "ragCorpusId": "1798062151227670528",
+    "importRagFilesConfig": {
+      "googleDriveSource": {
+        "resourceIds": [
+          {
+            "resourceType": "RESOURCE_TYPE_FOLDER",
+            "resourceId": "1PnbPT8ExANIfLOLz8pF0AoS9Q8QMaGCo"
+          }
+        ]
+      },
+      "ragFileParsingConfig": {
+        "layoutParser": {
+          "maxParsingRequestsPerMin": 120
+        }
+      }
+    },
+    "progressPercentage": 100
+  },
+  "done": true,
+  "response": {
+    "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.ImportRagFilesResponse",
+    "importedRagFilesCount": "6"
+  }
+}

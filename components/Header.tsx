@@ -53,13 +53,11 @@ export function Header({ onSettingsOpen }: HeaderProps) {
     >
       {/* Logo */}
       <div className="flex items-center gap-3">
-        <div
-          className="flex items-center justify-center w-8 h-8 rounded-lg font-bold text-sm"
-          style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-          aria-hidden="true"
-        >
-          DI
-        </div>
+        <img
+          src="/indaer-logo.png"
+          alt="Indaer Aviation Technical Services"
+          style={{ height: '32px', objectFit: 'contain', backgroundColor: 'white', padding: '2px', borderRadius: '4px' }}
+        />
         <span
           className="font-semibold text-sm tracking-tight"
           style={{ color: 'var(--text-primary)' }}

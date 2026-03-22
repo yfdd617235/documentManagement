@@ -28,16 +28,16 @@ export async function getAdcToken(): Promise<string> {
 // ─── Corpus management ────────────────────────────────────────────────────────
 
 /**
- * Creates a new RAG corpus for a user.
+ * Creates a new global shared RAG corpus for the company.
  * Embedding model: text-embedding-005.
  * Returns the corpus resource name (e.g. "projects/.../corpora/...")
  */
-export async function createCorpus(userId: string): Promise<string> {
+export async function createCorpus(folderId: string, folderName: string): Promise<string> {
   const project = process.env.GOOGLE_CLOUD_PROJECT_ID!;
   const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
   const token = await getAdcToken();
 
-  const displayName = `doc-intelligence-${userId.replace(/[^a-z0-9]/gi, '_').toLowerCase()}`;
+  const displayName = `company-kb-${folderId}`;
   const embeddingModel = `projects/${project}/locations/${location}/publishers/google/models/text-embedding-005`;
 
   const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/ragCorpora`;
@@ -50,6 +50,7 @@ export async function createCorpus(userId: string): Promise<string> {
     },
     body: JSON.stringify({
       displayName,
+      description: folderName, // Store the human-readable string here
       ragEmbeddingModelConfig: {
         vertexPredictionEndpoint: {
           endpoint: embeddingModel,
@@ -60,36 +61,52 @@ export async function createCorpus(userId: string): Promise<string> {
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(`Failed to create corpus: ${err?.error?.message ?? res.statusText}`);
+    throw new Error(`Failed to create global corpus: ${err?.error?.message ?? res.statusText}`);
   }
 
   const data = await res.json();
-  return data.name;
+  const operationName = data.name;
+  
+  // The API returns a Long Running Operation. We must poll it to get the actual Corpus Name.
+  const pollUrl = `https://${location}-aiplatform.googleapis.com/v1beta1/${operationName}`;
+  let retries = 10;
+  while (retries > 0) {
+    const pollRes = await fetch(pollUrl, { headers: { Authorization: `Bearer ${token}` } });
+    if (!pollRes.ok) throw new Error("Failed to poll corpus creation operation.");
+    
+    const pollData = await pollRes.json();
+    if (pollData.done) {
+      if (pollData.error) throw new Error(`Corpus creation failed: ${pollData.error.message}`);
+      return pollData.response.name; // This is the real corpus name: projects/.../ragCorpora/...
+    }
+    
+    await new Promise(r => setTimeout(r, 2000));
+    retries--;
+  }
+
+  throw new Error("Corpus creation timed out.");
 }
 
 /**
- * Lists all corpora and finds one whose display name matches the user.
- * Used as fallback when Supabase is not configured.
+ * Lists all global shared corpora for the company.
+ * Filters by the 'company-kb-' prefix.
  */
-export async function findCorpusByDisplayName(userId: string): Promise<string | null> {
+export async function listAllGlobalCorpora(): Promise<any[]> {
   const project = process.env.GOOGLE_CLOUD_PROJECT_ID!;
   const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
   const token = await getAdcToken();
-  const safeName = `doc-intelligence-${userId.replace(/[^a-z0-9]/gi, '_').toLowerCase()}`;
 
-  const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/ragCorpora`;
+  const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/ragCorpora?pageSize=100`;
 
-  try {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) return null;
-    
-    const data = await res.json();
-    const corpora = data.ragCorpora ?? [];
-    const match = corpora.find((c: any) => c.displayName === safeName);
-    return match?.name ?? null;
-  } catch {
-    return null;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(`Failed to list global corpora: ${err?.error?.message ?? res.statusText}`);
   }
+    
+  const data = await res.json();
+  const corpora = data.ragCorpora ?? [];
+  return corpora.filter((c: any) => c.displayName?.startsWith('company-kb-'));
 }
 
 // ─── Corpus Management ────────────────────────────────────────────────────────
@@ -330,34 +347,60 @@ export async function importDriveFolder(
 
   const url = `https://${location}-aiplatform.googleapis.com/v1beta1/${corpusName}/ragFiles:import`;
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      importRagFilesConfig: {
-        googleDriveSource: {
-          resourceIds: [
-            {
-              resourceId: folderId,
-              resourceType: 'RESOURCE_TYPE_FOLDER',
-            },
-          ],
-        },
-        ragFileChunkingConfig: {
-          chunkSize: 512,
-          chunkOverlap: 100,
-        },
-        maxEmbeddingRequestsPerMin: 900,
+  const payload = JSON.stringify({
+    importRagFilesConfig: {
+      googleDriveSource: {
+        resourceIds: [
+          {
+            resourceId: folderId,
+            resourceType: 'RESOURCE_TYPE_FOLDER',
+          },
+        ],
       },
-    }),
+      ragFileChunkingConfig: {
+        chunkSize: 512,
+        chunkOverlap: 100,
+      },
+      ragFileParsingConfig: {
+        layoutParser: {
+          maxParsingRequestsPerMin: 120, // Uses Google Document AI natively for OCR and layout parsing safely
+        },
+      },
+      maxEmbeddingRequestsPerMin: 900,
+    },
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Failed to start import: ${err?.error?.message ?? res.statusText}`);
+  let res;
+  let retries = 5;
+  let delayMs = 3000;
+
+  while (retries > 0) {
+    res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: payload,
+    });
+
+    if (res.ok) break;
+
+    const status = res.status;
+    // 404 or 500 are common when IAM permissions haven't finished propagating in Google's globally distributed systems.
+    if (status === 404 || status === 500) {
+      retries--;
+      if (retries === 0) break;
+      await new Promise((r) => setTimeout(r, delayMs));
+      delayMs += 2000; // progressive backoff
+    } else {
+      break; // break on 400 Bad Request or 401 Unauthorized, etc.
+    }
+  }
+
+  if (!res || !res.ok) {
+    const err = await res?.json().catch(() => ({}));
+    throw new Error(`Failed to start import after retries: ${err?.error?.message ?? res?.statusText}`);
   }
 
   const data = await res.json();
@@ -411,6 +454,30 @@ export async function pollImportOperation(
   }
 
   if (data.done) {
+    const response = data.response || {};
+    const imported = parseInt(response.importedRagFilesCount || '0', 10);
+    const failed = parseInt(response.failedRagFilesCount || '0', 10);
+    
+    // Catch silent Vertex AI backend crashes (0 files succeeded, but job marked as DONE)
+    if (imported === 0 && failed > 0) {
+      const partials = data.metadata?.genericMetadata?.partialFailures || [];
+      const failedIds = partials.map((f: any) => {
+        // extract the ID if it matches the standard error pattern
+        const match = f.message?.match(/processing ([\w-]+)/);
+        return match ? match[1] : f.message;
+      }).filter(Boolean);
+      
+      const failedListStr = failedIds.length > 0 
+        ? ` Archivos de Drive con falla (IDs): ${failedIds.slice(0, 10).join(', ')}${failedIds.length > 10 ? ' y más...' : ''}` 
+        : '';
+        
+      return {
+        name: operationName,
+        status: 'FAILED',
+        error: `Import failed: All ${failed} Google Drive files experienced an internal parsing error in Google Cloud.${failedListStr}`,
+      };
+    }
+    
     return { name: operationName, status: 'DONE', progress: 100 };
   }
 

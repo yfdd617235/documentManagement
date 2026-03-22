@@ -10,11 +10,12 @@ interface RagFile {
 }
 
 interface Props {
+  corpusName: string;
   onClose: () => void;
   onCorpusDeleted: () => void;
 }
 
-export function ManageCorpusPanel({ onClose, onCorpusDeleted }: Props) {
+export function ManageCorpusPanel({ corpusName, onClose, onCorpusDeleted }: Props) {
   const [files, setFiles] = useState<RagFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -25,7 +26,7 @@ export function ManageCorpusPanel({ onClose, onCorpusDeleted }: Props) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch('/api/rag/files');
+      const res = await fetch(`/api/rag/files?corpusName=${encodeURIComponent(corpusName)}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Got error fetching files');
       setFiles(data.files || []);
@@ -49,7 +50,7 @@ export function ManageCorpusPanel({ onClose, onCorpusDeleted }: Props) {
       const res = await fetch('/api/rag/files', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ragFileName }),
+        body: JSON.stringify({ corpusName, ragFileName }),
       });
       if (!res.ok) {
         const data = await res.json();
@@ -72,7 +73,7 @@ export function ManageCorpusPanel({ onClose, onCorpusDeleted }: Props) {
       const res = await fetch('/api/rag/files', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ all: true }),
+        body: JSON.stringify({ corpusName, all: true }),
       });
       if (!res.ok) {
         const data = await res.json();

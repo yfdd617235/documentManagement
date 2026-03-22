@@ -1,0 +1,63 @@
+{
+  "name": "projects/250935347147/locations/europe-west4/ragCorpora/6986208921958481920/operations/5107371011557294080",
+  "metadata": {
+    "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.ImportRagFilesOperationMetadata",
+    "genericMetadata": {
+      "partialFailures": [
+        {
+          "code": 13,
+          "message": "An internal error occurred processing 1wgJqaPMc2ZRdaEWbers_S8zEcIX1wffO"
+        },
+        {
+          "code": 13,
+          "message": "An internal error occurred processing 1LSMkOQbITjMbSMZjlrdVNLFaQropuil2"
+        },
+        {
+          "code": 13,
+          "message": "An internal error occurred processing 1GiUu5UvJ9B5_WkscxmVJe1huyweBPIfW"
+        },
+        {
+          "code": 13,
+          "message": "An internal error occurred processing 1zYmubEarN9YSpoRLIXRReIUsOuaJBdvA"
+        },
+        {
+          "code": 13,
+          "message": "An internal error occurred processing 1O4D6PhlV9c1vL88WXJFmEG44om9bsl2e"
+        },
+        {
+          "code": 13,
+          "message": "An internal error occurred processing 1aE4CmL-DDeYC6yI1nvfjLmpE-ckH5pj1"
+        }
+      ],
+      "createTime": "2026-03-22T20:36:08.640707Z",
+      "updateTime": "2026-03-22T20:36:23.346884Z"
+    },
+    "ragCorpusId": "6986208921958481920",
+    "importRagFilesConfig": {
+      "googleDriveSource": {
+        "resourceIds": [
+          {
+            "resourceType": "RESOURCE_TYPE_FOLDER",
+            "resourceId": "1PnbPT8ExANIfLOLz8pF0AoS9Q8QMaGCo"
+          }
+        ]
+      },
+      "ragFileChunkingConfig": {
+        "chunkSize": 512,
+        "chunkOverlap": 100
+      },
+      "maxEmbeddingRequestsPerMin": 900,
+      "ragFileParsingConfig": {
+        "llmParser": {
+          "modelName": "gemini-1.5-pro-002"
+        }
+      }
+    },
+    "progressPercentage": 100
+  },
+  "done": true,
+  "response": {
+    "@type": "type.googleapis.com/google.cloud.aiplatform.v1beta1.ImportRagFilesResponse",
+    "failedRagFilesCount": "6"
+  }
+}

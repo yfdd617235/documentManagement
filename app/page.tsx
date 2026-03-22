@@ -28,10 +28,19 @@ export default function Home() {
   const [manageOpen, setManageOpen] = useState(false);
   const [corpusName, setCorpusName] = useState<string | null>(null);
 
+  // Splash screen states
+  const [showSplash, setShowSplash] = useState(true);
+  const [splashOpacity, setSplashOpacity] = useState(1);
+
   // Hydrate from sessionStorage after mount — prevents SSR mismatch
   useEffect(() => {
     const saved = sessionStorage.getItem('corpusName');
     if (saved) setCorpusName(saved);
+
+    // Splash Screen animation sequence
+    const t1 = setTimeout(() => setSplashOpacity(0), 1000);
+    const t2 = setTimeout(() => setShowSplash(false), 1700);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
   }, []);
 
   function handleIndexingComplete(name: string) {
@@ -66,6 +75,26 @@ export default function Home() {
   // ── Authenticated app shell ───────────────────────────────────────────────
   return (
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: 'var(--bg)' }}>
+      {/* Splash Screen */}
+      {showSplash && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: '#ffffff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            opacity: splashOpacity,
+            transition: 'opacity 0.7s ease-out',
+            pointerEvents: 'none'
+          }}
+        >
+          <img src="/indaer-logo.png" alt="Indaer Logo" style={{ height: '100px', objectFit: 'contain' }} />
+        </div>
+      )}
+
       <Header onSettingsOpen={() => setSettingsOpen(true)} />
 
       {/* Mode toggle — only shown when corpus is ready */}
@@ -177,9 +206,10 @@ export default function Home() {
                 Cerrar
               </button>
             </div>
-            
+
             <div className="flex-1 overflow-hidden">
               <ManageCorpusPanel
+                corpusName={corpusName!}
                 onClose={() => setManageOpen(false)}
                 onCorpusDeleted={() => {
                   setManageOpen(false);
