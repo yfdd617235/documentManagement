@@ -54,16 +54,16 @@ export function ReferenceDocSelector({ onEntitiesConfirmed, corpusName }: Props)
       {/* File ID input */}
       <div className="rounded-xl p-5" style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}>
         <h3 className="font-semibold text-sm mb-1" style={{ color: 'var(--text-primary)' }}>
-          Documento de referencia
+          Reference Document
         </h3>
         <p className="text-xs mb-4" style={{ color: 'var(--text-secondary)' }}>
-          Ingresa el ID de un archivo PDF o Excel de Google Drive. La IA extraerá las entidades clave (números de parte, seriales, etc.)
+          Enter the ID of a Google Drive PDF or Excel file. The AI will extract key entities (part numbers, serials, etc.)
         </p>
         <div className="flex gap-2">
           <input
             value={fileId}
             onChange={(e) => setFileId(e.target.value)}
-            placeholder="ID del archivo de Drive (ej: 1abc...xyz)"
+            placeholder="Drive File ID (e.g., 1abc...xyz)"
             className="flex-1 rounded-lg px-3 py-2.5 text-sm outline-none"
             style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
             disabled={parsing}
@@ -76,7 +76,7 @@ export function ReferenceDocSelector({ onEntitiesConfirmed, corpusName }: Props)
             style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
           >
             {parsing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-            {parsing ? 'Analizando...' : 'Analizar'}
+            {parsing ? 'Parsing...' : 'Parse'}
           </button>
         </div>
         {error && (
@@ -94,7 +94,7 @@ export function ReferenceDocSelector({ onEntitiesConfirmed, corpusName }: Props)
                 {parsed.file_name}
               </h3>
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                {editableEntities.length} entidades · {parsed.entity_type}
+                {editableEntities.length} entities · {parsed.entity_type}
               </p>
             </div>
           </div>
@@ -113,7 +113,7 @@ export function ReferenceDocSelector({ onEntitiesConfirmed, corpusName }: Props)
                   onClick={() => removeEntity(idx)}
                   className="ml-0.5 opacity-50 hover:opacity-100 text-xs leading-none"
                   style={{ color: '#f87171' }}
-                  title="Eliminar"
+                  title="Remove"
                 >×</button>
               </span>
             ))}
@@ -124,7 +124,7 @@ export function ReferenceDocSelector({ onEntitiesConfirmed, corpusName }: Props)
             <input
               value={newEntity}
               onChange={(e) => setNewEntity(e.target.value)}
-              placeholder="Agregar entidad manualmente..."
+              placeholder="Add entity manually..."
               className="flex-1 rounded-lg px-3 py-2 text-xs outline-none"
               style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}
               onKeyDown={(e) => e.key === 'Enter' && addEntity()}
@@ -134,7 +134,7 @@ export function ReferenceDocSelector({ onEntitiesConfirmed, corpusName }: Props)
               disabled={!newEntity.trim()}
               className="px-3 py-2 rounded-lg text-xs font-medium transition-all disabled:opacity-40"
               style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-            >Agregar</button>
+            >Add</button>
           </div>
 
           <button
@@ -144,7 +144,7 @@ export function ReferenceDocSelector({ onEntitiesConfirmed, corpusName }: Props)
             style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
           >
             <Search size={14} />
-            Buscar {editableEntities.length} entidades en documentos
+            Search {editableEntities.length} entities in documents
           </button>
         </div>
       )}

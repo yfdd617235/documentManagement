@@ -91,7 +91,7 @@ export default function Home() {
             pointerEvents: 'none'
           }}
         >
-          <img src="/indaer-logo.png" alt="Indaer Logo" style={{ height: '100px', objectFit: 'contain' }} />
+          <img src="/indaer-logo.png" alt="Indaer Logo" style={{ height: '', objectFit: 'contain' }} />
         </div>
       )}
 
@@ -111,8 +111,8 @@ export default function Home() {
           >
             {(
               [
-                { id: 'search', label: 'Buscar documentos' },
-                { id: 'classify', label: 'Clasificar por referencia' },
+                { id: 'search', label: 'Search Documents' },
+                { id: 'classify', label: 'Classify by Reference' },
               ] as { id: AppMode; label: string }[]
             ).map(({ id, label }) => (
               <button
@@ -137,17 +137,17 @@ export default function Home() {
               onClick={() => setManageOpen(true)}
               className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
               style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
-              title="Ver y gestionar archivos indexados"
+              title="View and manage indexed files"
             >
-              Administrar Índice
+              Manage Corpus
             </button>
             <button
               onClick={handleClearCorpus}
               className="text-xs px-3 py-1.5 rounded-lg font-medium transition-colors"
               style={{ color: 'var(--text-secondary)', backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}
-              title="Indexar otra carpeta de Drive sin borrar la actual"
+              title="Index another Drive folder without losing the current one"
             >
-              Cambiar carpeta indexada
+              Change Database
             </button>
           </div>
         </div>
@@ -195,7 +195,7 @@ export default function Home() {
           <aside className="slide-over-panel p-6 flex flex-col">
             <div className="flex items-center justify-between mb-6 shrink-0">
               <h2 className="font-semibold text-base" style={{ color: 'var(--text-primary)' }}>
-                Administrar Índice
+                Manage Corpus
               </h2>
               <button
                 onClick={() => setManageOpen(false)}
@@ -203,7 +203,7 @@ export default function Home() {
                 style={{ padding: '4px 8px', fontSize: '0.75rem' }}
                 aria-label="Close manage panel"
               >
-                Cerrar
+                Close
               </button>
             </div>
 

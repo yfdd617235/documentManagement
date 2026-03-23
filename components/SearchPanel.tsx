@@ -53,32 +53,29 @@ export function SearchPanel({ corpusName }: SearchPanelProps) {
       {errorMessage && (
         <div className="px-4 py-3 text-sm rounded-lg mx-4 mt-3" style={{ backgroundColor: 'var(--danger)', color: '#fff', opacity: 0.9 }}>
           <strong>Error:</strong> {errorMessage}
-          <button onClick={() => setErrorMessage(null)} className="ml-2 underline text-xs">Cerrar</button>
+          <button onClick={() => setErrorMessage(null)} className="ml-2 underline text-xs">Close</button>
         </div>
       )}
       {/* ── Messages Area ── */}
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center fade-in">
-            <div className="p-4 rounded-full mb-4" style={{ backgroundColor: 'var(--accent)', opacity: 0.1 }}>
-              <Bot size={40} style={{ color: 'var(--accent)' }} />
-            </div>
-            <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Buscador Conversacional</h3>
+            <h3 className="text-xl font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>Conversational Search</h3>
             <p className="max-w-md text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
-              Hazle una pregunta a tu base de datos documental. La IA analizará los archivos indexados y responderá citando rigurosamente las fuentes.
+              Ask your document database a question. The AI will analyze the indexed files and respond by rigorously citing its sources.
             </p>
           </div>
         ) : (
           messages.map((m: any, idx: number) => {
             const isUser = m.role === 'user';
-            
+
             // Calculate which assistant message this is to match with sourcesLists
             const assistantIndex = messages.slice(0, idx + 1).filter((msg: any) => msg.role === 'assistant').length - 1;
             const sources = !isUser ? sourcesLists[assistantIndex] : null;
 
             return (
               <div key={m.id} className={`flex flex-col ${isUser ? 'items-end' : 'items-start'} fade-in`}>
-                <div 
+                <div
                   className={`max-w-[85%] px-5 py-3 rounded-2xl ${isUser ? 'rounded-br-sm' : 'rounded-tl-sm'}`}
                   style={{
                     backgroundColor: isUser ? 'var(--accent)' : 'var(--bg)',
@@ -94,13 +91,13 @@ export function SearchPanel({ corpusName }: SearchPanelProps) {
                 {/* Render Sources for Assistant Messages */}
                 {!isUser && sources && sources.length > 0 && (
                   <div className="mt-3 ml-2 flex flex-col gap-2 w-[85%]">
-                    <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Fuentes extraídas</span>
+                    <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-secondary)' }}>Extracted Sources</span>
                     <div className="flex flex-wrap gap-2">
                       {sources.map((src, i) => (
-                        <a 
-                          key={i} 
-                          href={src.drive_url} 
-                          target="_blank" 
+                        <a
+                          key={i}
+                          href={src.drive_url}
+                          target="_blank"
                           rel="noreferrer"
                           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs transition-colors"
                           style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}
@@ -117,31 +114,31 @@ export function SearchPanel({ corpusName }: SearchPanelProps) {
             );
           })
         )}
-        
+
         {/* Loading Indicator */}
         {isLoading && messages[messages.length - 1]?.role === 'user' && (
           <div className="flex items-start fade-in">
             <div className="px-5 py-4 rounded-2xl rounded-tl-sm flex gap-2 items-center" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}>
               <Loader2 size={16} className="animate-spin" style={{ color: 'var(--accent)' }} />
-              <span className="text-sm font-medium animate-pulse" style={{ color: 'var(--text-secondary)' }}>Analizando documentos...</span>
+              <span className="text-sm font-medium animate-pulse" style={{ color: 'var(--text-secondary)' }}>Analyzing documents...</span>
             </div>
           </div>
         )}
-        
+
         <div ref={messagesEndRef} />
       </div>
 
       {/* ── Input Area ── */}
       <div className="p-4" style={{ borderTop: '1px solid var(--border)' }}>
-        <form 
-          onSubmit={handleSubmit} 
+        <form
+          onSubmit={handleSubmit}
           className="relative flex items-center w-full rounded-xl overflow-hidden shadow-sm"
           style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--border)' }}
         >
           <input
             value={input}
             onChange={handleInputChange}
-            placeholder="Pregunta algo sobre tus documentos..."
+            placeholder="Ask something about your documents..."
             className="w-full py-4 pl-5 pr-14 bg-transparent outline-none text-sm placeholder:opacity-50"
             style={{ color: 'var(--text-primary)' }}
             disabled={isLoading}
@@ -157,7 +154,7 @@ export function SearchPanel({ corpusName }: SearchPanelProps) {
           </button>
         </form>
         <p className="text-center mt-2 text-xs" style={{ color: 'var(--text-secondary)' }}>
-          La IA solo usará la información extraída de los documentos.
+          The AI will only use information extracted from your documents.
         </p>
       </div>
     </div>

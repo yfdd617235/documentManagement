@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Sun, Moon, Settings2 } from 'lucide-react';
+import { Settings, LogOut, Sun, Moon, Maximize2, Minimize2, Database, Settings2 } from 'lucide-react';
 import { DriveStatus } from './DriveStatus';
 
 interface HeaderProps {
@@ -58,12 +58,13 @@ export function Header({ onSettingsOpen }: HeaderProps) {
           alt="Indaer Aviation Technical Services"
           style={{ height: '32px', objectFit: 'contain', backgroundColor: 'white', padding: '2px', borderRadius: '4px' }}
         />
-        <span
-          className="font-semibold text-sm tracking-tight"
-          style={{ color: 'var(--text-primary)' }}
-        >
-          Document Intelligence by YOSEF GIRALDO
-        </span>
+        <h1 className="text-base font-semibold leading-tight flex items-center gap-2 slide-in" style={{ color: 'var(--text-primary)' }}>
+            <Database size={16} style={{ color: 'var(--accent)' }}/>
+            Agentic RAG Engine
+          </h1>
+          <p className="text-xs slide-in" style={{ color: 'var(--text-secondary)', animationDelay: '0.1s' }}>
+            Enterprise Document Chat
+          </p>
       </div>
 
       {/* Right side */}

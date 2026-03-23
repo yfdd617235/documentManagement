@@ -468,13 +468,14 @@ export async function pollImportOperation(
       }).filter(Boolean);
       
       const failedListStr = failedIds.length > 0 
-        ? ` Archivos de Drive con falla (IDs): ${failedIds.slice(0, 10).join(', ')}${failedIds.length > 10 ? ' y más...' : ''}` 
+        ? ` Archivos de Drive con falla (IDs): ${failedIds.slice(0, 5).join(', ')}${failedIds.length > 5 ? ' y más...' : ''}` 
         : '';
         
       return {
         name: operationName,
         status: 'FAILED',
         error: `Import failed: All ${failed} Google Drive files experienced an internal parsing error in Google Cloud.${failedListStr}`,
+        failedIds
       };
     }
     

@@ -42,7 +42,7 @@ export function ManageCorpusPanel({ corpusName, onClose, onCorpusDeleted }: Prop
   }, []);
 
   async function handleDeleteFile(ragFileName: string) {
-    if (!confirm('¿Estás seguro de eliminar este documento del índice?')) return;
+    if (!confirm('Are you sure you want to remove this document from the index?')) return;
     
     setDeletingId(ragFileName);
     setError(null);
@@ -65,7 +65,7 @@ export function ManageCorpusPanel({ corpusName, onClose, onCorpusDeleted }: Prop
   }
 
   async function handleDeleteCorpus() {
-    if (!confirm('⚠️ ¿Estás COMPLETAMENTE SEGURO de eliminar todo el índice? Tendrás que volver a indexar desde cero.')) return;
+    if (!confirm('⚠️ Are you COMPLETELY SURE you want to delete the entire index? You will have to re-index from scratch.')) return;
     
     setDeletingAll(true);
     setError(null);
@@ -100,8 +100,8 @@ export function ManageCorpusPanel({ corpusName, onClose, onCorpusDeleted }: Prop
         )}
 
         <div className="mb-5 rounded-lg p-3 text-xs" style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-          <p className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>¿Cómo renombrar un documento?</p>
-          Google Cloud lee el nombre directamente de tu Drive. Para cambiar el nombre de un documento aquí, debes <strong>renombrarlo en Google Drive</strong> y usar el botón de <RefreshCw size={10} className="inline mx-0.5" /> Sincronizar en la pantalla principal.
+          <p className="font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>How to rename a document?</p>
+          Google Cloud reads the name directly from your Drive. To change the name here, you must <strong>rename it in Google Drive</strong> and use the <RefreshCw size={10} className="inline mx-0.5" /> Sync button on the main screen.
         </div>
 
         {loading ? (
@@ -110,12 +110,12 @@ export function ManageCorpusPanel({ corpusName, onClose, onCorpusDeleted }: Prop
           </div>
         ) : files.length === 0 ? (
           <div className="text-center py-10 text-sm" style={{ color: 'var(--text-secondary)' }}>
-            No hay documentos indexados en este momento.
+            There are no indexed documents at this time.
           </div>
         ) : (
           <div className="flex flex-col gap-2">
             <h4 className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-secondary)' }}>
-              {files.length} Documento{files.length !== 1 ? 's' : ''} indexado{files.length !== 1 ? 's' : ''}
+              {files.length} Indexed Document{files.length !== 1 ? 's' : ''}
             </h4>
             
             {files.map((file) => (
@@ -139,7 +139,7 @@ export function ManageCorpusPanel({ corpusName, onClose, onCorpusDeleted }: Prop
                   onClick={() => handleDeleteFile(file.name)}
                   disabled={deletingId === file.name}
                   className="p-1.5 rounded-md hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors disabled:opacity-50 shrink-0"
-                  title="Eliminar del índice"
+                  title="Remove from index"
                 >
                   {deletingId === file.name ? (
                     <Loader2 size={16} className="animate-spin" />
@@ -162,9 +162,9 @@ export function ManageCorpusPanel({ corpusName, onClose, onCorpusDeleted }: Prop
           style={{ backgroundColor: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5' }}
         >
           {deletingAll ? (
-            <><Loader2 size={16} className="animate-spin" /> Vaciando índice completo...</>
+            <><Loader2 size={16} className="animate-spin" /> Emptying entire index...</>
           ) : (
-            <><Trash2 size={16} /> Eliminar todo el índice</>
+            <><Trash2 size={16} /> Delete entire index</>
           )}
         </button>
       </div>

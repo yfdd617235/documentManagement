@@ -117,7 +117,7 @@ export function ClassifyView({ corpusName }: { corpusName: string }) {
       {step === 'searching' && (
         <div className="flex flex-col items-center justify-center py-20 gap-4" style={{ color: 'var(--text-secondary)' }}>
           <Loader2 size={32} className="animate-spin" style={{ color: 'var(--accent)' }} />
-          <p className="text-sm font-medium">Buscando documentos en el corpus...</p>
+          <p className="text-sm font-medium">Searching for documents in the corpus...</p>
         </div>
       )}
 
