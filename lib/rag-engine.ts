@@ -41,6 +41,47 @@ export async function getAdcToken(): Promise<string> {
   return tokenResponse.token!;
 }
 
+/**
+ * Robust fetch wrapper with exponential backoff for Google APIs.
+ * Transparently handles 429 (Rate Limit) and 503 (Service Unavailable).
+ * Returns the parsed JSON body.
+ */
+export async function fetchWithRetry(url: string, options: RequestInit = {}, maxRetries = 3): Promise<any> {
+  let lastError: any;
+  let delay = 1000;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const res = await fetch(url, options);
+      
+      // Success? Parse and return
+      if (res.ok) {
+        return await res.json();
+      }
+
+      // Client errors (4xx) except 429 are usually not retryable
+      if (res.status < 500 && res.status !== 429) {
+        throw new Error(`API Error ${res.status}: ${await res.text()}`);
+      }
+
+      // Status 429 or 5xx → retry with backoff
+      console.warn(`[RAG/FETCH] Retry ${i + 1}/${maxRetries} for ${url} (status ${res.status})`);
+      lastError = new Error(`API Error ${res.status} after ${maxRetries} retries`);
+      
+    } catch (e: any) {
+      lastError = e;
+      if (e.message.includes('API Error 4')) { // Non-retryable client error
+         throw e;
+      }
+    }
+
+    await new Promise(r => setTimeout(r, delay));
+    delay *= 2; // Exponential backoff
+  }
+
+  throw lastError;
+}
+
 // ─── Corpus management ────────────────────────────────────────────────────────
 
 /**
@@ -58,7 +99,7 @@ export async function createCorpus(folderId: string, folderName: string): Promis
 
   const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/ragCorpora`;
   
-  const res = await fetch(url, {
+  const data = await fetchWithRetry(url, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -75,25 +116,20 @@ export async function createCorpus(folderId: string, folderName: string): Promis
     }),
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Failed to create global corpus: ${err?.error?.message ?? res.statusText}`);
-  }
-
-  const data = await res.json();
   const operationName = data.name;
   
   // The API returns a Long Running Operation. We must poll it to get the actual Corpus Name.
   const pollUrl = `https://${location}-aiplatform.googleapis.com/v1beta1/${operationName}`;
   let retries = 10;
   while (retries > 0) {
-    const pollRes = await fetch(pollUrl, { headers: { Authorization: `Bearer ${token}` } });
-    if (!pollRes.ok) throw new Error("Failed to poll corpus creation operation.");
-    
-    const pollData = await pollRes.json();
-    if (pollData.done) {
-      if (pollData.error) throw new Error(`Corpus creation failed: ${pollData.error.message}`);
-      return pollData.response.name; // This is the real corpus name: projects/.../ragCorpora/...
+    try {
+      const pollData = await fetchWithRetry(pollUrl, { headers: { Authorization: `Bearer ${token}` } });
+      if (pollData.done) {
+        if (pollData.error) throw new Error(`Corpus creation failed: ${pollData.error.message}`);
+        return pollData.response.name; // This is the real corpus name: projects/.../ragCorpora/...
+      }
+    } catch (e) {
+      console.warn("[RAG] Polling corpus creation failed, retrying...", e);
     }
     
     await new Promise(r => setTimeout(r, 2000));
@@ -114,14 +150,8 @@ export async function listAllGlobalCorpora(): Promise<any[]> {
 
   const url = `https://${location}-aiplatform.googleapis.com/v1beta1/projects/${project}/locations/${location}/ragCorpora?pageSize=100`;
 
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Failed to list global corpora: ${err?.error?.message ?? res.statusText}`);
-  }
-    
-  const data = await res.json();
-  const corpora = data.ragCorpora ?? [];
+  const res = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${token}` } });
+  const corpora = res.ragCorpora ?? [];
   return corpora.filter((c: any) => c.displayName?.startsWith('company-kb-'));
 }
 
@@ -134,13 +164,7 @@ export async function listRagFiles(corpusName: string): Promise<any[]> {
   const token = await getAdcToken();
   const url = `https://${process.env.VERTEX_AI_LOCATION ?? 'us-central1'}-aiplatform.googleapis.com/v1beta1/${corpusName}/ragFiles?pageSize=100`;
 
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Failed to list RAG files: ${err?.error?.message ?? res.statusText}`);
-  }
-
-  const data = await res.json();
+  const data = await fetchWithRetry(url, { headers: { Authorization: `Bearer ${token}` } });
   return data.ragFiles ?? [];
 }
 
@@ -152,11 +176,7 @@ export async function deleteRagFile(ragFileName: string): Promise<void> {
   const token = await getAdcToken();
   const url = `https://${process.env.VERTEX_AI_LOCATION ?? 'us-central1'}-aiplatform.googleapis.com/v1beta1/${ragFileName}`;
 
-  const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Failed to delete RAG file: ${err?.error?.message ?? res.statusText}`);
-  }
+  await fetchWithRetry(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
 }
 
 /**
@@ -166,11 +186,7 @@ export async function deleteCorpus(corpusName: string): Promise<void> {
   const token = await getAdcToken();
   const url = `https://${process.env.VERTEX_AI_LOCATION ?? 'us-central1'}-aiplatform.googleapis.com/v1beta1/${corpusName}`;
 
-  const res = await fetch(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(`Failed to delete corpus: ${err?.error?.message ?? res.statusText}`);
-  }
+  await fetchWithRetry(url, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
 }
 
 // ─── Project number (auto-fetched from GCP if not in env) ────────────────────
@@ -201,29 +217,18 @@ async function getProjectNumber(): Promise<string> {
   // Call Cloud Resource Manager with Application Default Credentials
   const token = await getAdcToken();
 
-  const res = await fetch(
+  const data = await fetchWithRetry(
     `https://cloudresourcemanager.googleapis.com/v1/projects/${projectId}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(
-      `Could not auto-fetch project number for "${projectId}": ` +
-      `${err?.error?.message ?? res.statusText}. ` +
-      'Fix: set GOOGLE_CLOUD_PROJECT_NUMBER manually in .env.local ' +
-      '(find it at https://console.cloud.google.com/home/dashboard).'
-    );
-  }
-
-  const data = await res.json();
+ 
   if (!data.projectNumber) {
     throw new Error(
       `GCP returned no projectNumber for "${projectId}". ` +
       'Set GOOGLE_CLOUD_PROJECT_NUMBER manually in .env.local.'
     );
   }
-
+ 
   _cachedProjectNumber = String(data.projectNumber);
   return _cachedProjectNumber;
 }
@@ -247,36 +252,11 @@ export async function grantRagAgentDriveAccess(
 
   // ── Step 1: Verify the folder exists and check if it's a Shared Drive ───────
   // We use supportsAllDrives=true so we CAN see Shared Drive files (to detect them)
-  const metaRes = await fetch(
+  const meta = await fetchWithRetry(
     `https://www.googleapis.com/drive/v3/files/${folderId}` +
     `?fields=id,name,driveId,mimeType&supportsAllDrives=true`,
     { headers: { Authorization: `Bearer ${userAccessToken}` } }
   );
-
-  if (!metaRes.ok) {
-    const err = await metaRes.json().catch(() => ({}));
-    const status = metaRes.status;
-    const msg = err?.error?.message ?? metaRes.statusText;
-
-    if (status === 404) {
-      throw new Error(
-        `Folder not found: "${folderId}". ` +
-        'Possible causes: (1) wrong folder ID — check the URL in Drive, ' +
-        '(2) the folder belongs to a different Google account than the one connected, ' +
-        '(3) the folder has never been shared with anyone. ' +
-        'Make sure you copied the ID from the URL: drive.google.com/drive/folders/[ID]'
-      );
-    }
-    if (status === 403) {
-      throw new Error(
-        `Access denied to folder "${folderId}". ` +
-        'The Google account connected to this app does not have access to that folder.'
-      );
-    }
-    throw new Error(`Drive API error (${status}): ${msg}`);
-  }
-
-  const meta = await metaRes.json();
 
   // ── Step 2: Reject Shared Drives (not supported by Vertex AI RAG Engine) ────
   const isSharedDrive = !!meta.driveId || meta.mimeType === 'application/vnd.google-apps.folder' && !!meta.driveId;
@@ -289,18 +269,13 @@ export async function grantRagAgentDriveAccess(
   }
 
   // ── Step 3: Check existing permissions and grant if needed ──────────────────
-  const listRes = await fetch(
+  const listData = await fetchWithRetry(
     `https://www.googleapis.com/drive/v3/files/${folderId}/permissions` +
     `?fields=permissions(emailAddress,role)&supportsAllDrives=true`,
     { headers: { Authorization: `Bearer ${userAccessToken}` } }
   );
 
-  if (!listRes.ok) {
-    const err = await listRes.json().catch(() => ({}));
-    throw new Error(`Failed to list folder permissions: ${err?.error?.message ?? listRes.statusText}`);
-  }
-
-  const { permissions } = await listRes.json();
+  const permissions = listData.permissions || [];
   const alreadyGranted = permissions?.some(
     (p: any) =>
       p.emailAddress?.toLowerCase() === ragServiceAgent.toLowerCase() &&
@@ -310,7 +285,7 @@ export async function grantRagAgentDriveAccess(
   if (alreadyGranted) return { alreadyGranted: true, agentEmail: ragServiceAgent };
 
   // Grant Viewer access to RAG service agent
-  const createRes = await fetch(
+  await fetchWithRetry(
     `https://www.googleapis.com/drive/v3/files/${folderId}/permissions?supportsAllDrives=true`,
     {
       method: 'POST',
@@ -325,15 +300,6 @@ export async function grantRagAgentDriveAccess(
       }),
     }
   );
-
-  if (!createRes.ok) {
-    const err = await createRes.json().catch(() => ({}));
-    const msg = err?.error?.message ?? createRes.statusText;
-    throw new Error(
-      `Failed to grant Viewer access to RAG service agent (${ragServiceAgent}): ${msg}. ` +
-      'Ensure you have "Can share" permission on this folder.'
-    );
-  }
 
   return { alreadyGranted: false, agentEmail: ragServiceAgent };
 }
@@ -380,40 +346,34 @@ export async function importDriveFolder(
     },
   });
 
-  let res;
+  let data;
   let retries = 5;
   let delayMs = 3000;
-
+ 
   while (retries > 0) {
-    res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: payload,
-    });
-
-    if (res.ok) break;
-
-    const status = res.status;
-    // 404 or 500 are common when IAM permissions haven't finished propagating in Google's globally distributed systems.
-    if (status === 404 || status === 500) {
-      retries--;
-      if (retries === 0) break;
-      await new Promise((r) => setTimeout(r, delayMs));
-      delayMs += 2000; // progressive backoff
-    } else {
-      break; // break on 400 Bad Request or 401 Unauthorized, etc.
+    try {
+      data = await fetchWithRetry(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: payload,
+      });
+      break; 
+    } catch (e: any) {
+      // 404 or 500 are common when IAM permissions haven't finished propagating in Google's globally distributed systems.
+      if (e.message.includes('404') || e.message.includes('500')) {
+        retries--;
+        if (retries === 0) throw e;
+        await new Promise((r) => setTimeout(r, delayMs));
+        delayMs += 2000;
+      } else {
+        throw e;
+      }
     }
   }
-
-  if (!res || !res.ok) {
-    const err = await res?.json().catch(() => ({}));
-    throw new Error(`Failed to start import after retries: ${err?.error?.message ?? res?.statusText}`);
-  }
-
-  const data = await res.json();
+ 
   const operationName = data.name || data.operation?.name;
   if (!operationName) throw new Error('Started import but no operation name returned.');
   
@@ -435,19 +395,9 @@ export async function pollImportOperation(
 
   const token = await getAdcToken();
 
-  const res = await fetch(url, {
+  const data = await fetchWithRetry(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
-
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(
-      `Failed to poll import status: ${err?.error?.message ?? res.statusText}. ` +
-      'Check that GOOGLE_APPLICATION_CREDENTIALS is set correctly.'
-    );
-  }
-
-  const data = await res.json();
 
   if (data.error) {
     return {
@@ -522,7 +472,7 @@ export async function retrieveContexts(
   const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
 
   try {
-    const res = await fetch(url, {
+    const data = await fetchWithRetry(url, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${token}`,
@@ -537,17 +487,9 @@ export async function retrieveContexts(
         query: { text: query },
       }),
     });
-
-    console.log(`[RAG DEBUG] status=${res.status} corpus=${corpusName} query="${query}"`);
-
-    console.log(`[RAG DEBUG] status=${res.status} url=${url}`);
-
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(`Failed to retrieve contexts: ${err?.error?.message ?? res.statusText}`);
-    }
-
-    const data = await res.json();
+ 
+    console.log(`[RAG DEBUG] corpus=${corpusName} query="${query}"`);
+ 
     const contexts = data?.contexts?.contexts ?? [];
 
     return contexts.map((ctx: any) => ({

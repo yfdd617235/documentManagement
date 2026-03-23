@@ -99,10 +99,27 @@ export async function POST(req: NextRequest) {
     if (modelId === 'gemini-1.5-flash' || modelId === 'gemini-2.0-flash') {
       modelId = 'gemini-2.5-flash';
     }
-    const model = getFallbackChain(provider as any, modelId)[0];
-
+    
+    const llmChain = getFallbackChain(provider as any, modelId);
     const prompt = ENTITY_EXTRACTION_PROMPT.replace('{TEXT}', extractedText);
-    const { text } = await generateText({ model, prompt, temperature: 0 });
+
+    let text = '';
+    let lastError;
+
+    // --- RESILIENT GENERATION LOOP ---
+    for (const model of llmChain) {
+      try {
+        const result = await generateText({ model, prompt, temperature: 0 });
+        text = result.text;
+        break; // Success!
+      } catch (e: any) {
+        console.warn(`[API/PARSE] Failover triggered. Error: ${e.message}`);
+        lastError = e;
+        if (e.status === 400) break; // Don't retry on bad prompts
+      }
+    }
+
+    if (!text && lastError) throw lastError;
 
     // 5. Parse LLM JSON response
     const jsonMatch = text.match(/\{[\s\S]*\}/);

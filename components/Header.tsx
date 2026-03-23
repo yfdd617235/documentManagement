@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { Settings, LogOut, Sun, Moon, Maximize2, Minimize2, Database, Settings2 } from 'lucide-react';
 import { DriveStatus } from './DriveStatus';
 
@@ -52,20 +53,25 @@ export function Header({ onSettingsOpen }: HeaderProps) {
       }}
     >
       {/* Logo */}
-      <div className="flex items-center gap-3">
+      <Link 
+        href="/"
+        className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity no-underline"
+      >
         <img
           src="/indaer-logo.png"
           alt="Indaer Aviation Technical Services"
           style={{ height: '32px', objectFit: 'contain', backgroundColor: 'white', padding: '2px', borderRadius: '4px' }}
         />
-        <h1 className="text-base font-semibold leading-tight flex items-center gap-2 slide-in" style={{ color: 'var(--text-primary)' }}>
+        <div className="flex flex-col">
+          <h1 className="text-base font-semibold leading-tight flex items-center gap-2 slide-in" style={{ color: 'var(--text-primary)' }}>
             <Database size={16} style={{ color: 'var(--accent)' }}/>
             Agentic RAG Engine
           </h1>
           <p className="text-xs slide-in" style={{ color: 'var(--text-secondary)', animationDelay: '0.1s' }}>
             Enterprise Document Chat
           </p>
-      </div>
+        </div>
+      </Link>
 
       {/* Right side */}
       <div className="flex items-center gap-4">

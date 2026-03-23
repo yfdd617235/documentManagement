@@ -2,6 +2,8 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createVertex } from '@ai-sdk/google-vertex';
 import type { LanguageModel } from 'ai';
 
+export const HEALTHY_GCP_REGIONS = ['europe-west4', 'us-central1', 'us-east1', 'us-east4', 'asia-northeast1', 'australia-southeast1'];
+
 export type ProviderType = 'openrouter' | 'ollama' | 'gemini';
 
 export interface ModelOption {
@@ -12,8 +14,9 @@ export interface ModelOption {
 
 /**
  * Returns the Vercel AI SDK LanguageModel for the requested provider and model.
+ * locationOverride allows trying different GCP regions for Gemini.
  */
-export function getLLM(provider: ProviderType, modelId: string): any {
+export function getLLM(provider: ProviderType, modelId: string, locationOverride?: string): any {
   switch (provider) {
     case 'openrouter': {
       const openRouter = createOpenAI({
@@ -31,7 +34,7 @@ export function getLLM(provider: ProviderType, modelId: string): any {
       });
       return ollama(modelId);
     }
-
+ 
     case 'gemini': {
       // Vertex AI SDK on Vercel requires explicit credentials from JSON env var
       const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
@@ -47,10 +50,12 @@ export function getLLM(provider: ProviderType, modelId: string): any {
         }
       }
 
-      console.log(`[LLM DEBUG] createVertex project=${process.env.GOOGLE_CLOUD_PROJECT_ID} location=${process.env.VERTEX_AI_LOCATION || 'us-central1'}`);
+      const location = locationOverride || process.env.VERTEX_AI_LOCATION || 'us-central1';
+      console.log(`[LLM/GCP] createVertex project=${process.env.GOOGLE_CLOUD_PROJECT_ID} location=${location}`);
+      
       const vertex = createVertex({
         project: process.env.GOOGLE_CLOUD_PROJECT_ID,
-        location: process.env.VERTEX_AI_LOCATION || 'us-central1',
+        location,
         googleAuthOptions,
       });
       return vertex(modelId);
@@ -70,34 +75,41 @@ export function getFallbackChain(
   primaryModelId: string
 ): any[] {
   const chain: any[] = [];
+  const primaryLocation = process.env.VERTEX_AI_LOCATION || 'us-central1';
 
-  // 1. Always try the requested model first
+  // 1. Primary choice
   try {
     chain.push(getLLM(primaryProvider, primaryModelId));
-  } catch {}
+  } catch (e) {
+    console.error('[LLM/CHAIN] Primary provider init failed:', e);
+  }
 
-  // 2. OpenRouter fallback (generic model like meta-llama/llama-3-8b-instruct)
-  if (primaryProvider !== 'openrouter' && process.env.OPENROUTER_API_KEY) {
+  // 2. If provider is Gemini, add other healthy regions as immediate fallbacks
+  if (primaryProvider === 'gemini') {
+    for (const loc of HEALTHY_GCP_REGIONS) {
+      if (loc !== primaryLocation) {
+        try {
+          chain.push(getLLM('gemini', primaryModelId, loc));
+        } catch {}
+      }
+    }
+  }
+
+  // 3. OpenRouter fallback (generic model)
+  if (process.env.OPENROUTER_API_KEY) {
     try {
-      chain.push(getLLM('openrouter', 'meta-llama/llama-3-8b-instruct'));
+      chain.push(getLLM('openrouter', 'meta-llama/llama-3.1-8b-instruct'));
     } catch {}
   }
 
-  // 3. Ollama fallback (llama3)
-  if (primaryProvider !== 'ollama') {
+  // 4. Last resort: Gemini Flash in us-central1 (if not already the primary)
+  if (primaryProvider !== 'gemini' || primaryLocation !== 'us-central1') {
     try {
-      chain.push(getLLM('ollama', 'llama3'));
+      chain.push(getLLM('gemini', 'gemini-2.0-flash', 'us-central1'));
     } catch {}
   }
 
-  // 4. Gemini fallback (always available if deployed on GCP)
-  if (primaryProvider !== 'gemini') {
-    try {
-      chain.push(getLLM('gemini', 'gemini-2.5-flash'));
-    } catch {}
-  }
-
-  return chain.length > 0 ? chain : [getLLM('gemini', 'gemini-2.5-flash')];
+  return chain.length > 0 ? chain : [getLLM('gemini', 'gemini-2.0-flash', 'us-central1')];
 }
 
 /**
@@ -107,7 +119,6 @@ export async function getOpenRouterModels(): Promise<ModelOption[]> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) return [];
 
-  // Short timeout so UI doesn't hang if OpenRouter is slow
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 3000);
 
@@ -138,7 +149,7 @@ export async function getOllamaModels(): Promise<ModelOption[]> {
   const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434/v1';
   
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 1500); // Fail fast
+  const timeoutId = setTimeout(() => controller.abort(), 1500);
 
   try {
     const res = await fetch(`${baseUrl}/models`, { signal: controller.signal });

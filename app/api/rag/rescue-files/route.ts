@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getToken } from 'next-auth/jwt';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { getCorpusForUser } from '@/lib/supabase';
+import { fetchWithRetry, getAdcToken } from '@/lib/rag-engine';
 
 export async function POST(req: NextRequest) {
   const token = await getToken({ req });
@@ -27,20 +28,34 @@ export async function POST(req: NextRequest) {
       const driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
       const driveMetaUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType`;
       
-      const metaRes = await fetch(driveMetaUrl, { headers: { Authorization: `Bearer ${token.accessToken as string}` } });
-      const meta = await metaRes.json();
+      const meta = await fetchWithRetry(driveMetaUrl, { headers: { Authorization: `Bearer ${token.accessToken as string}` } });
       const fileName = meta.name || 'documento_escaneado.pdf';
       const mimeType = meta.mimeType || 'application/pdf';
 
-      const resDrive = await fetch(driveUrl, { headers: { Authorization: `Bearer ${token.accessToken as string}` } });
+      const resDrive = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', { // fetch handles the stream better for arrayBuffer
+        headers: { Authorization: `Bearer ${token.accessToken as string}` }
+      });
       const buffer = await resDrive.arrayBuffer();
 
-      // 2) OCR with standard Gemini Vision API
-      const result = await model.generateContent([
-        'Extrae absolutamente todo el texto y datos legibles de este documento. Si es un formulario, respeta su estructura.',
-        { inlineData: { data: Buffer.from(buffer).toString('base64'), mimeType } }
-      ]);
-      const extractedText = result.response.text();
+      // 2) OCR with standard Gemini Vision API (Manual Retry for non-fetch SDK)
+      let extractedText = '';
+      let ocrError;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const result = await model.generateContent([
+            'Extrae absolutamente todo el texto y datos legibles de este documento. Si es un formulario, respeta su estructura.',
+            { inlineData: { data: Buffer.from(buffer).toString('base64'), mimeType } }
+          ]);
+          extractedText = result.response.text();
+          if (extractedText) break;
+        } catch (e) {
+          console.warn(`[RESCUE/OCR] Attempt ${attempt} failed for ${fileId}:`, e);
+          ocrError = e;
+          await new Promise(r => setTimeout(r, 1000 * attempt));
+        }
+      }
+      
+      if (!extractedText) throw ocrError || new Error('OCR failed after 3 attempts');
 
       // 3. Upload extracted text to User's Google Drive using drive.file scope
       // Place it in the SAME folder that is being indexed so Vertex sees it!
@@ -67,7 +82,7 @@ export async function POST(req: NextRequest) {
         extractedText +
         close_delim;
 
-      const driveUploadRes = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      const uploadedDriveFile = await fetchWithRetry('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token.accessToken as string}`,
@@ -76,19 +91,16 @@ export async function POST(req: NextRequest) {
         body: multipartRequestBody
       });
 
-      if (!driveUploadRes.ok) throw new Error(`Drive upload failed: ${await driveUploadRes.text()}`);
-      const uploadedDriveFile = await driveUploadRes.json();
       const newDriveUri = `https://drive.google.com/file/d/${uploadedDriveFile.id}`;
 
       // 4. Import the new Google Drive Text File into Vertex AI Corpus using standard import API
-      const { getAdcToken } = await import('@/lib/rag-engine');
       const saToken = await getAdcToken();
       
       const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
       const importUrl = `https://${location}-aiplatform.googleapis.com/v1beta1/${corpusName}:importRagFiles`;
       
       // NOTE: Endpoint fix. Must use :importRagFiles (the LRO) for Drive uris.
-      const importRes = await fetch(importUrl, {
+      const importData = await fetchWithRetry(importUrl, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${saToken}`,
@@ -107,8 +119,6 @@ export async function POST(req: NextRequest) {
         })
       });
 
-      if (!importRes.ok) throw new Error(`Vertex RAG import failed: ${await importRes.text()}`);
-      const importData = await importRes.json();
       const operationName = importData.name;
       rescuedCount++;
 

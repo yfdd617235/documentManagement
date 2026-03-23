@@ -44,8 +44,7 @@ export async function POST(req: NextRequest) {
   }
 
   const llmChain = getFallbackChain(provider as any, modelId);
-  const model = llmChain[0];
-
+  
   // 2. Get active Corpus — prefer client-supplied value over DB lookup
   const dbCorpus = await getCorpusForUser(token.sub);
   const activeCorpusName = corpusName || dbCorpus?.corpus_name;
@@ -55,11 +54,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    let result;
+    let contexts: any[] = [];
+
     if (mode === 1) {
       // ── MODE 1: Conversational Search ──────────────────────────────────────
       const query = latestMessage.content;
-
-      const contexts = await retrieveContexts(activeCorpusName, query, 10, 0.7);
+      contexts = await retrieveContexts(activeCorpusName, query, 10, 0.7);
       console.log(`[API/CHAT] Retrieved ${contexts.length} contexts for query: ${query}`);
 
       const formattedContext = contexts.length > 0
@@ -68,15 +69,25 @@ export async function POST(req: NextRequest) {
 
       const system = MODE_1_SYSTEM_PROMPT.replace('{CONTEXT}', formattedContext);
 
-      const result = await streamText({
-        model,
-        system,
-        messages,
-        temperature: 0.1,
-      });
+      // --- RESILIENT GENERATION LOOP ---
+      let lastError;
+      for (const model of llmChain) {
+        try {
+          result = await streamText({
+            model,
+            system,
+            messages,
+            temperature: 0.1,
+          });
+          break; // Success!
+        } catch (e: any) {
+          console.warn(`[API/CHAT] Mode 1 failover. Trying next model... Error: ${e.message}`);
+          lastError = e;
+          if (e.status === 400) break; // Don't retry on bad prompts
+        }
+      }
+      if (!result) throw lastError;
 
-      // StreamingTextResponse is the ai@3.x compatible API that useChat expects.
-      // Sources are embedded in a custom header decoded on the client side.
       return new StreamingTextResponse(result.toAIStream(), {
         headers: {
           'x-rag-sources': Buffer.from(JSON.stringify(contexts)).toString('base64'),
@@ -84,13 +95,25 @@ export async function POST(req: NextRequest) {
       });
 
     } else {
-      // ── MODE 2: Placeholder ────────────────────────────────────────────────
-      const result = await streamText({
-        model,
-        system: 'You are an AI assistant orchestrating Drive operations.',
-        messages,
-        tools: MCP_TOOLS as any,
-      });
+      // ── MODE 2: Agent Tools ────────────────────────────────────────────────
+      let lastError;
+      for (const model of llmChain) {
+        try {
+          result = await streamText({
+            model,
+            system: 'You are an AI assistant orchestrating Drive operations.',
+            messages,
+            tools: MCP_TOOLS as any,
+          });
+          break;
+        } catch (e: any) {
+          console.warn(`[API/CHAT] Mode 2 failover. Trying next model... Error: ${e.message}`);
+          lastError = e;
+          if (e.status === 400) break;
+        }
+      }
+      if (!result) throw lastError;
+      
       return new StreamingTextResponse(result.toAIStream());
     }
 
