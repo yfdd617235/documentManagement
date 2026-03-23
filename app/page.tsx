@@ -100,8 +100,8 @@ export default function Home() {
       {/* Mode toggle — only shown when corpus is ready */}
       {corpusName && (
         <div
-          className="flex flex-col sm:flex-row items-center justify-between px-6 py-3 gap-3"
-          style={{ borderBottom: '1px solid var(--border)' }}
+          className="sticky top-[57px] z-20 flex flex-col sm:flex-row items-center justify-between px-6 py-3 gap-3"
+          style={{ borderBottom: '1px solid var(--border)', backgroundColor: 'var(--bg)' }}
         >
           <div
             className="flex rounded-lg p-1 gap-1"
