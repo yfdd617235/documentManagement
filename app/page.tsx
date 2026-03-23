@@ -91,7 +91,7 @@ export default function Home() {
             pointerEvents: 'none'
           }}
         >
-          <img src="/indaer-logo.png" alt="Indaer Logo" style={{ height: '', objectFit: 'contain' }} />
+          <img src="/indaer-logo.png" alt="Indaer Logo" style={{ height: '25vh', objectFit: 'contain' }} />
         </div>
       )}
 
