@@ -25,10 +25,11 @@ export interface CorpusRecord {
 }
 
 export interface ImportOperationStatus {
-  name: string;          // operation resource name
+  name: string;          // operation name or full resource name
   status: 'RUNNING' | 'DONE' | 'FAILED';
   progress?: number;     // 0-100
   error?: string;
+  failedIds?: string[];
 }
 
 // ─── LLM Provider ─────────────────────────────────────────────────────────────

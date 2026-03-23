@@ -16,12 +16,11 @@ export function ConnectPage() {
     >
       {/* Logo */}
       <div className="flex flex-col items-center gap-6 max-w-md w-full text-center">
-        <div
-          className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold"
-          style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-        >
-          DI
-        </div>
+        <img
+          src="/indaer-logo.png"
+          alt="Indaer Aviation Technical Services"
+          style={{ height: '32px', objectFit: 'contain', backgroundColor: 'white', padding: '2px', borderRadius: '4px' }}
+        />
 
         <div>
           <h1

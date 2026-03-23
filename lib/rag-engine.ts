@@ -17,9 +17,15 @@ import type { RetrievedChunk, ImportOperationStatus } from '@/types';
 // Used to get the Application Default Credentials token for REST API calls
 export async function getAdcToken(): Promise<string> {
   const { GoogleAuth } = await import('google-auth-library');
+  
+  // Vercel/Production: We often store the JSON as a secret environment variable
+  const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+  
   const auth = new GoogleAuth({
     scopes: 'https://www.googleapis.com/auth/cloud-platform',
+    ...(credentialsJson ? { credentials: JSON.parse(credentialsJson) } : {}),
   });
+
   const client = await auth.getClient();
   const tokenResponse = await client.getAccessToken();
   return tokenResponse.token!;
