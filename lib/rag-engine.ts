@@ -21,9 +21,20 @@ export async function getAdcToken(): Promise<string> {
   // Vercel/Production: We often store the JSON as a secret environment variable
   const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
   
+  if (!credentialsJson) {
+    throw new Error('GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable is missing.');
+  }
+
+  let credentials;
+  try {
+    credentials = JSON.parse(credentialsJson);
+  } catch (e: any) {
+    throw new Error(`Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON: ${e.message}`);
+  }
+
   const auth = new GoogleAuth({
     scopes: 'https://www.googleapis.com/auth/cloud-platform',
-    ...(credentialsJson ? { credentials: JSON.parse(credentialsJson) } : {}),
+    credentials,
   });
 
   const client = await auth.getClient();

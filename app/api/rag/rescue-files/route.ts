@@ -81,10 +81,8 @@ export async function POST(req: NextRequest) {
       const newDriveUri = `https://drive.google.com/file/d/${uploadedDriveFile.id}`;
 
       // 4. Import the new Google Drive Text File into Vertex AI Corpus using standard import API
-      const { GoogleAuth } = require('google-auth-library');
-      const auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
-      const client = await auth.getClient();
-      const saToken = (await client.getAccessToken()).token;
+      const { getAdcToken } = await import('@/lib/rag-engine');
+      const saToken = await getAdcToken();
       
       const location = process.env.VERTEX_AI_LOCATION || 'us-central1';
       const importUrl = `https://${location}-aiplatform.googleapis.com/v1beta1/${corpusName}:importRagFiles`;
