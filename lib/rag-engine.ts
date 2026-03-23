@@ -10,7 +10,6 @@
  * Chunking: size=512, overlap=100
  */
 
-import { VertexAI } from '@google-cloud/vertexai';
 import type { RetrievedChunk, ImportOperationStatus } from '@/types';
 
 // ─── Shared ADC Token Helper ──────────────────────────────────────────────────
@@ -200,13 +199,7 @@ async function getProjectNumber(): Promise<string> {
   }
 
   // Call Cloud Resource Manager with Application Default Credentials
-  const { GoogleAuth } = await import('google-auth-library');
-  const auth = new GoogleAuth({
-    scopes: 'https://www.googleapis.com/auth/cloud-platform',
-  });
-  const client = await auth.getClient();
-  const tokenResponse = await client.getAccessToken();
-  const token = tokenResponse.token;
+  const token = await getAdcToken();
 
   const res = await fetch(
     `https://cloudresourcemanager.googleapis.com/v1/projects/${projectId}`,
@@ -440,13 +433,7 @@ export async function pollImportOperation(
 
   const url = `https://${location}-aiplatform.googleapis.com/v1/${operationName}`;
 
-  const { GoogleAuth } = await import('google-auth-library');
-  const auth = new GoogleAuth({
-    scopes: 'https://www.googleapis.com/auth/cloud-platform',
-  });
-  const client = await auth.getClient();
-  const tokenResponse = await client.getAccessToken();
-  const token = tokenResponse.token;
+  const token = await getAdcToken();
 
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
