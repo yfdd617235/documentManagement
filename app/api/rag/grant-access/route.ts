@@ -56,22 +56,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     const message = err?.message ?? 'Unknown error';
 
-    // Shared Drive detection
-    if (message.startsWith('SHARED_DRIVE_DETECTED:')) {
-      return NextResponse.json(
-        {
-          error: 'shared_drive',
-          message: message.replace('SHARED_DRIVE_DETECTED: ', ''),
-          instructions: [
-            '1. Open the Shared Drive folder in Google Drive.',
-            '2. Select all files → right-click → "Make a copy".',
-            '3. Move the copies to a folder in My Drive.',
-            '4. Use that My Drive folder ID here.',
-          ],
-        },
-        { status: 403 }
-      );
-    }
+    // Shared Drive detection (DEPRECATED - Now allowed)
 
     return NextResponse.json(
       {

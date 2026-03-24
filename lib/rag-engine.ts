@@ -258,15 +258,7 @@ export async function grantRagAgentDriveAccess(
     { headers: { Authorization: `Bearer ${userAccessToken}` } }
   );
 
-  // ── Step 2: Reject Shared Drives (not supported by Vertex AI RAG Engine) ────
-  const isSharedDrive = !!meta.driveId || meta.mimeType === 'application/vnd.google-apps.folder' && !!meta.driveId;
-  if (isSharedDrive) {
-    throw new Error(
-      'SHARED_DRIVE_DETECTED: This folder is in a Shared Drive. ' +
-      'Vertex AI RAG Engine does not support Shared Drives — only personal My Drive folders. ' +
-      'Workaround: copy the folder contents to a folder in My Drive, then index that.'
-    );
-  }
+  // ── Step 2: [DELETED] Check for Shared Drive. (Now allowed experimentally) ───
 
   // ── Step 3: Check existing permissions and grant if needed ──────────────────
   const listData = await fetchWithRetry(
