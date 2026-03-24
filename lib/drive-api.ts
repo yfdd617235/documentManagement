@@ -12,7 +12,7 @@ export async function downloadFileContent(
   fileId: string,
   accessToken: string,
 ): Promise<Buffer> {
-  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -30,7 +30,7 @@ export async function getFileMetadata(
   fileId: string,
   accessToken: string,
 ): Promise<{ name: string; mimeType: string }> {
-  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType`;
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType&supportsAllDrives=true`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -53,7 +53,7 @@ export async function createFolder(
     metadata.parents = [parentFolderId];
   }
 
-  const res = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink', {
+  const res = await fetch('https://www.googleapis.com/drive/v3/files?fields=id,webViewLink&supportsAllDrives=true', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -85,7 +85,7 @@ export async function copyFile(
   if (newName) body.name = newName;
 
   const res = await fetch(
-    `https://www.googleapis.com/drive/v3/files/${fileId}/copy?fields=id,webViewLink`,
+    `https://www.googleapis.com/drive/v3/files/${fileId}/copy?fields=id,webViewLink&supportsAllDrives=true`,
     {
       method: 'POST',
       headers: {

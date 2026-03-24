@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
       extractedText = allText.join('\n').slice(0, 12000);
     } else if (mimeType === 'application/vnd.google-apps.spreadsheet') {
       // Google Sheets — export as xlsx first
-      const exportUrl = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`;
+      const exportUrl = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet&supportsAllDrives=true`;
       const res = await fetch(exportUrl, {
         headers: { Authorization: `Bearer ${token.accessToken}` },
       });

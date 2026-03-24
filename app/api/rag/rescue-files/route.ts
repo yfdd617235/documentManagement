@@ -25,14 +25,14 @@ export async function POST(req: NextRequest) {
   for (const fileId of failedIds) {
     try {
       // 1) Download from user's Drive
-      const driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
-      const driveMetaUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType`;
+      const driveUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&supportsAllDrives=true`;
+      const driveMetaUrl = `https://www.googleapis.com/drive/v3/files/${fileId}?fields=name,mimeType&supportsAllDrives=true`;
       
       const meta = await fetchWithRetry(driveMetaUrl, { headers: { Authorization: `Bearer ${token.accessToken as string}` } });
       const fileName = meta.name || 'documento_escaneado.pdf';
       const mimeType = meta.mimeType || 'application/pdf';
 
-      const resDrive = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', { // fetch handles the stream better for arrayBuffer
+      const resDrive = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media&supportsAllDrives=true', { // fetch handles the stream better for arrayBuffer
         headers: { Authorization: `Bearer ${token.accessToken as string}` }
       });
       const buffer = await resDrive.arrayBuffer();
@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
         extractedText +
         close_delim;
 
-      const uploadedDriveFile = await fetchWithRetry('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+      const uploadedDriveFile = await fetchWithRetry('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token.accessToken as string}`,

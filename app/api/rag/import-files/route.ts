@@ -43,7 +43,7 @@ export async function POST(req: NextRequest) {
   try {
     // --- DEBUG METADATA LOGGER ---
     try {
-      const driveUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed=false&fields=files(id,name,mimeType,size)`;
+      const driveUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed=false&fields=files(id,name,mimeType,size)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
       const resDrive = await fetch(driveUrl, {
         headers: { Authorization: `Bearer ${token.accessToken}` },
       });
