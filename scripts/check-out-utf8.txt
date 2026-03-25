@@ -1,0 +1,28 @@
+﻿[dotenv@17.3.1] injecting env (12) from .env.local -- tip: ≡ƒöÉ prevent committing .env to code: https://dotenvx.com/precommit
+Checking project: documentmanagement-490723
+Current location in .env.local: europe-west4
+
+--- Checking region: us-central1 ---
+No corpora found.
+
+--- Checking region: europe-west4 ---
+ - doc-intelligence-101369433288222196712 (projects/documentmanagement-490723/locations/europe-west4/ragCorpora/6917529027641081856)
+   Description: N/A
+ - test-corpus-endpoint (projects/documentmanagement-490723/locations/europe-west4/ragCorpora/3458764513820540928)
+   Description: N/A
+ - test-api-corpus-002 (projects/documentmanagement-490723/locations/europe-west4/ragCorpora/6878122530901590016)
+   Description: N/A
+ - test-api-corpus-002 (projects/documentmanagement-490723/locations/europe-west4/ragCorpora/68679894317400064)
+   Description: N/A
+ - test-flash-corpus (projects/documentmanagement-490723/locations/europe-west4/ragCorpora/5256826665048211456)
+   Description: N/A
+ - company-kb-1ZQmWVUCJwfQlelurzZ3YxnKt8hS-GLdO (projects/documentmanagement-490723/locations/europe-west4/ragCorpora/2765773121158905856)
+   Description: Ejemplo 1 (A330 1288)
+ - company-kb-1JgGcWqHpZ93olJpQCZEav3ORdw-zrXW9 (projects/documentmanagement-490723/locations/europe-west4/ragCorpora/7953919891889717248)
+   Description: H01 HTC Certificates
+
+--- Checking region: us-east1 ---
+No corpora found.
+
+--- Checking region: europe-west1 ---
+No corpora found.

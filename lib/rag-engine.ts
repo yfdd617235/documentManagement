@@ -13,10 +13,19 @@ import type { RetrievedChunk, ImportOperationStatus } from '@/types';
 
 // ─── Environment & Clients ────────────────────────────────────────────────────
 
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // Needs service role to bypass RLS for background imports
-);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const _supabase = (supabaseUrl && supabaseKey) 
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
+
+function getSupabase() {
+  if (!_supabase) {
+    throw new Error('Supabase is not configured. Please set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.');
+  }
+  return _supabase;
+}
 
 // We'll use the REST API for embeddings to stay consistent with the original Spanner code's style
 const EMBEDDING_MODEL = 'text-embedding-004';
@@ -84,7 +93,7 @@ export async function listAllGlobalCorpora(): Promise<any[]> {
   // We can derive corpora from unique document_ids or just query a separate table if we had one.
   // For simplicity, we'll return a placeholder that matches the UI needs
   // In a real app, you'd have a 'corpora' table.
-  const { data: chunks } = await supabase
+  const { data: chunks } = await getSupabase()
     .from('document_chunks')
     .select('document_id, folder_name:metadata->folder_name')
     .limit(100);
@@ -97,7 +106,7 @@ export async function listAllGlobalCorpora(): Promise<any[]> {
 }
 
 export async function listRagFiles(corpusName: string): Promise<any[]> {
-  const { data: chunks } = await supabase
+  const { data: chunks } = await getSupabase()
     .from('document_chunks')
     .select('document_id, file_name:metadata->file_name')
     .eq('document_id', corpusName);
@@ -111,14 +120,14 @@ export async function listRagFiles(corpusName: string): Promise<any[]> {
 
 export async function deleteRagFile(ragFileName: string): Promise<void> {
   const fileName = ragFileName.replace('files/', '');
-  await supabase
+  await getSupabase()
     .from('document_chunks')
     .delete()
     .eq('metadata->>file_name', fileName);
 }
 
 export async function deleteCorpus(corpusName: string): Promise<void> {
-  await supabase
+  await getSupabase()
     .from('document_chunks')
     .delete()
     .eq('document_id', corpusName);
@@ -165,7 +174,7 @@ export async function importDriveFolder(corpusName: string, folderId: string): P
   // For this migration, we'll use a Supabase operation table to simulate polling.
   const operationId = `op-${Date.now()}`;
   
-  await supabase.from('import_operations').insert({
+  await getSupabase().from('import_operations').insert({
     name: operationId,
     status: 'RUNNING',
     progress: 0
@@ -224,7 +233,7 @@ async function processImport(operationId: string, corpusName: string, folderId: 
         const embedding = await getEmbedding(chunks[j]);
 
         // 5. Store in Supabase
-        await supabase.from('document_chunks').insert({
+        await getSupabase().from('document_chunks').insert({
           document_id: corpusName,
           content: chunks[j],
           embedding,
@@ -237,19 +246,19 @@ async function processImport(operationId: string, corpusName: string, folderId: 
         });
       }
 
-      await supabase.from('import_operations').update({
+      await getSupabase().from('import_operations').update({
         progress: Math.round(((i + 1) / files.length) * 100)
       }).eq('name', operationId);
     }
 
-    await supabase.from('import_operations').update({
+    await getSupabase().from('import_operations').update({
       status: 'DONE',
       progress: 100
     }).eq('name', operationId);
 
   } catch (error: any) {
     console.error('[RAG IMPORT ERROR]', error);
-    await supabase.from('import_operations').update({
+    await getSupabase().from('import_operations').update({
       status: 'FAILED',
       error: error.message
     }).eq('name', operationId);
@@ -257,7 +266,7 @@ async function processImport(operationId: string, corpusName: string, folderId: 
 }
 
 export async function pollImportOperation(operationName: string): Promise<ImportOperationStatus> {
-  const { data: op } = await supabase
+  const { data: op } = await getSupabase()
     .from('import_operations')
     .select('*')
     .eq('name', operationName)
@@ -285,7 +294,7 @@ export async function retrieveContexts(
   const queryEmbedding = await getEmbedding(query);
 
   // 2. Search Supabase via RPC
-  const { data: matches, error } = await supabase.rpc('match_documents', {
+  const { data: matches, error } = await getSupabase().rpc('match_documents', {
     query_embedding: queryEmbedding,
     match_threshold: 1 - distanceThreshold, // Supabase <=> is cosine distance, match_threshold is similarity
     match_count: topK
