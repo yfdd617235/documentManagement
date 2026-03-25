@@ -1,8 +1,6 @@
-'use client';
-
 import { useState } from 'react';
-import { ExternalLink, CheckSquare, Square, FolderPlus, Star } from 'lucide-react';
-import type { ClassificationPlan, FileToCopy } from '@/types';
+import { ExternalLink, CheckSquare, Square, FolderPlus, Star, Folder, File, ChevronRight, ChevronDown } from 'lucide-react';
+import type { ClassificationPlan, FileToCopy, ClassificationFolder } from '@/types';
 
 interface Props {
   plan: ClassificationPlan;
@@ -11,12 +9,19 @@ interface Props {
 }
 
 export function ClassificationPlanUI({ plan, onFolderNameChange, onConfirm }: Props) {
-  const [folderName, setFolderName] = useState(plan.destination_folder_name);
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set(plan.files_to_copy.map((f) => f.file_id))
-  );
+  const [folderName, setFolderName] = useState(plan.master_folder_name);
+  
+  // Get all unique file IDs from the plan
+  const allFileIds = Array.from(new Set(
+    plan.items.flatMap(item => item.files_to_copy.map(f => f.file_id))
+  ));
+  
+  const [selected, setSelected] = useState<Set<string>>(new Set(allFileIds));
+  const [expandedItems, setExpandedItems] = useState<Set<string>>(new Set(plan.items.map(i => i.id)));
 
-  function toggle(fileId: string) {
+  const totalFiles = allFileIds.length;
+
+  function toggleFile(fileId: string) {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(fileId)) next.delete(fileId);
@@ -25,121 +30,160 @@ export function ClassificationPlanUI({ plan, onFolderNameChange, onConfirm }: Pr
     });
   }
 
-  function toggleAll() {
-    if (selected.size === plan.files_to_copy.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(plan.files_to_copy.map((f) => f.file_id)));
-    }
+  function toggleItem(item: ClassificationFolder) {
+    const itemFileIds = item.files_to_copy.map(f => f.file_id);
+    const allSelected = itemFileIds.every(id => selected.has(id));
+    
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) itemFileIds.forEach(id => next.delete(id));
+      else itemFileIds.forEach(id => next.add(id));
+      return next;
+    });
   }
 
-  function scoreBar(score: number) {
-    const pct = Math.min(100, Math.round(score * 100));
-    const color = pct > 70 ? '#4ade80' : pct > 40 ? '#facc15' : '#94a3b8';
-    return (
-      <div className="flex items-center gap-1.5">
-        <div className="h-1.5 rounded-full flex-1 overflow-hidden" style={{ backgroundColor: 'var(--border)' }}>
-          <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, backgroundColor: color }} />
-        </div>
-        <span className="text-xs font-mono tabular-nums" style={{ color, minWidth: 36 }}>{pct}%</span>
-      </div>
-    );
+  function toggleExpand(itemId: string) {
+    setExpandedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (selected.size === totalFiles) setSelected(new Set());
+    else setSelected(new Set(allFileIds));
   }
 
   return (
-    <div className="flex flex-col gap-4 w-full max-w-3xl mx-auto">
+    <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h3 className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
-            Plan de clasificación — {plan.files_to_copy.length} archivos
+            Plan de Clasificación Estructurado — {plan.items.length} ítems
           </h3>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-            Selecciona los archivos a copiar. Los originales nunca se modifican.
+            Se crearán subcarpetas para cada ítem. Los archivos originales no se mueven, se copian.
           </p>
         </div>
-        <button onClick={toggleAll} className="text-xs underline" style={{ color: 'var(--accent)' }}>
-          {selected.size === plan.files_to_copy.length ? 'Deseleccionar todo' : 'Seleccionar todo'}
+        <button onClick={toggleAll} className="text-xs underline font-medium" style={{ color: 'var(--accent)' }}>
+          {selected.size === totalFiles ? 'Deseleccionar todo' : 'Seleccionar todo'}
         </button>
       </div>
 
-      {/* Destination folder name */}
-      <div className="flex items-center gap-2 rounded-lg px-3 py-2" style={{ backgroundColor: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <FolderPlus size={14} style={{ color: 'var(--accent)', flexShrink: 0 }} />
-        <label className="text-xs font-medium shrink-0" style={{ color: 'var(--text-secondary)' }}>Carpeta destino:</label>
-        <input
-          value={folderName}
-          onChange={(e) => { setFolderName(e.target.value); onFolderNameChange(e.target.value); }}
-          className="flex-1 bg-transparent text-sm outline-none font-medium"
-          style={{ color: 'var(--text-primary)' }}
-        />
+      {/* Destination master folder */}
+      <div className="card p-4 flex flex-col gap-3 slide-in">
+        <div className="flex items-center gap-3">
+           <FolderPlus size={18} style={{ color: 'var(--accent)' }} className="shrink-0" />
+           <div className="flex-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider block mb-1" style={{ color: 'var(--text-secondary)' }}>Carpeta Maestra en Drive</label>
+              <input
+                value={folderName}
+                onChange={(e) => { setFolderName(e.target.value); onFolderNameChange(e.target.value); }}
+                className="w-full bg-transparent text-sm outline-none font-semibold border-b border-[var(--border)] focus:border-[var(--accent)] pb-1"
+                style={{ color: 'var(--text-primary)' }}
+                placeholder="Nombre de la carpeta principal..."
+              />
+           </div>
+        </div>
       </div>
 
-      {/* File list */}
-      <div className="rounded-xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-        {plan.files_to_copy.map((file: FileToCopy, idx: number) => (
-          <div
-            key={file.file_id}
-            onClick={() => toggle(file.file_id)}
-            className="flex items-start gap-3 px-4 py-3 cursor-pointer transition-colors"
-            style={{
-              backgroundColor: selected.has(file.file_id) ? 'rgba(99,102,241,0.06)' : 'var(--surface)',
-              borderBottom: idx < plan.files_to_copy.length - 1 ? '1px solid var(--border)' : 'none',
-            }}
-          >
-            {/* Checkbox */}
-            <div className="mt-0.5 shrink-0" style={{ color: selected.has(file.file_id) ? 'var(--accent)' : 'var(--border)' }}>
-              {selected.has(file.file_id) ? <CheckSquare size={16} /> : <Square size={16} />}
+      {/* Item Groups */}
+      <div className="flex flex-col gap-3">
+        {plan.items.map((item) => {
+          const itemFileIds = item.files_to_copy.map(f => f.file_id);
+          const allSelected = itemFileIds.every(id => selected.has(id));
+          const someSelected = itemFileIds.some(id => selected.has(id));
+          const isExpanded = expandedItems.has(item.id);
+
+          return (
+            <div key={item.id} className="card overflow-hidden slide-in">
+              {/* Item Header */}
+              <div className="flex items-center gap-3 px-4 py-3 bg-slate-50/50 hover:bg-slate-50 transition-colors border-b" style={{ borderColor: 'var(--border)' }}>
+                 <button onClick={() => toggleExpand(item.id)} className="p-1 hover:bg-slate-200 rounded">
+                    {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                 </button>
+                 
+                 <div onClick={() => toggleItem(item)} className="cursor-pointer">
+                    {allSelected ? (
+                       <CheckSquare size={16} className="text-[var(--accent)]" />
+                    ) : someSelected ? (
+                       <div className="w-4 h-4 rounded-sm bg-[var(--accent)] opacity-50 relative flex items-center justify-center">
+                          <div className="w-2.5 h-0.5 bg-white rounded-full"></div>
+                       </div>
+                    ) : (
+                       <Square size={16} className="text-[var(--border)]" />
+                    )}
+                 </div>
+
+                 <div className="flex-1 flex items-center gap-3 cursor-pointer" onClick={() => toggleExpand(item.id)}>
+                    <Folder size={16} className="text-amber-500" />
+                    <span className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
+                       {item.folder_name}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-white border border-[var(--border)] font-bold text-[var(--text-secondary)]">
+                       {item.files_to_copy.length} Archivos
+                    </span>
+                 </div>
+              </div>
+
+              {/* Files in Item */}
+              {isExpanded && (
+                <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+                  {item.files_to_copy.map((file) => (
+                    <div
+                      key={file.file_id}
+                      className="flex items-center gap-3 px-10 py-2.5 hover:bg-slate-50 transition-colors cursor-pointer group"
+                      onClick={() => toggleFile(file.file_id)}
+                    >
+                      <div className="shrink-0" style={{ color: selected.has(file.file_id) ? 'var(--accent)' : 'var(--border)' }}>
+                         {selected.has(file.file_id) ? <CheckSquare size={14} /> : <Square size={14} />}
+                      </div>
+                      <File size={14} className="opacity-30 group-hover:opacity-60" />
+                      <div className="flex-1 min-w-0">
+                         <p className="text-xs truncate font-medium" style={{ color: 'var(--text-primary)' }}>{file.file_name}</p>
+                      </div>
+                      {file.drive_url && (
+                        <a
+                          href={file.drive_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1.5 hover:bg-slate-200 rounded text-[var(--accent)]"
+                        >
+                          <ExternalLink size={12} />
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-
-            {/* Info */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium truncate" style={{ color: 'var(--text-primary)' }}>
-                  {file.file_name}
-                </span>
-                {file.drive_url && (
-                  <a
-                    href={file.drive_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                    className="shrink-0"
-                    style={{ color: 'var(--text-secondary)' }}
-                  >
-                    <ExternalLink size={12} />
-                  </a>
-                )}
-              </div>
-
-              {/* Matched entities */}
-              <div className="flex flex-wrap gap-1 mt-1">
-                {file.matched_entities.map((e, i) => (
-                  <span key={i} className="text-xs px-1.5 py-0.5 rounded" style={{ backgroundColor: 'var(--bg)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
-                    {e}
-                  </span>
-                ))}
-              </div>
-
-              {/* Score bar */}
-              <div className="mt-2 max-w-[200px]">
-                {scoreBar(file.match_score)}
-              </div>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Confirm button */}
-      <button
-        onClick={() => onConfirm(Array.from(selected))}
-        disabled={selected.size === 0}
-        className="flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-40"
-        style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
-      >
-        <Star size={15} />
-        Confirmar y copiar {selected.size} archivo{selected.size !== 1 ? 's' : ''} →
-      </button>
+      <div className="card p-6 flex flex-col items-center gap-4 border-t-4 border-[var(--accent)] slide-in" style={{ backgroundColor: 'rgba(99,102,241,0.02)' }}>
+         <div className="text-center">
+            <h4 className="font-bold text-sm" style={{ color: 'var(--text-primary)' }}>¿Autorizar Generación?</h4>
+            <p className="text-xs max-w-md mx-auto mt-2" style={{ color: 'var(--text-secondary)' }}>
+               Al confirmar, la IA creará la carpeta maestra y las subcarpetas organizadas en Drive. 
+               Se copiarán <strong>{selected.size}</strong> archivos en total.
+            </p>
+         </div>
+         
+         <button
+           onClick={() => onConfirm(Array.from(selected))}
+           disabled={selected.size === 0}
+           className="btn-primary w-full max-w-sm flex items-center justify-center gap-3 py-3"
+         >
+           <Star size={18} fill="currentColor" />
+           <span className="uppercase tracking-widest text-xs font-black">Autorizar y Organizar</span>
+         </button>
+      </div>
     </div>
   );
 }

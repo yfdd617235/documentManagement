@@ -3,7 +3,7 @@ import { getToken } from 'next-auth/jwt';
 import { createFolder, copyFile } from '@/lib/drive-api';
 import { isSupabaseConfigured } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
-import type { FileToCopy } from '@/types';
+import type { FileToCopy, ClassificationPlan, ClassificationFolder } from '@/types';
 
 export async function POST(req: NextRequest) {
   const token = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
@@ -11,21 +11,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  const { plan, selectedFileIds } = await req.json();
-  if (!plan || !plan.destination_folder_name || !plan.files_to_copy) {
+  const { plan, selectedFileIds } = await req.json() as { plan: ClassificationPlan, selectedFileIds: string[] };
+  if (!plan || !plan.master_folder_name || !plan.items) {
     return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
   }
 
-  // Only copy the user-approved files
-  const approved: FileToCopy[] = plan.files_to_copy.filter(
-    (f: FileToCopy) => !selectedFileIds || selectedFileIds.includes(f.file_id),
-  );
+  // Count total files to be processed
+  let totalApproved = 0;
+  plan.items.forEach(item => {
+    item.files_to_copy.forEach(f => {
+      if (!selectedFileIds || selectedFileIds.includes(f.file_id)) totalApproved++;
+    });
+  });
 
-  if (approved.length === 0) {
+  if (totalApproved === 0) {
     return NextResponse.json({ error: 'No files selected for copy' }, { status: 400 });
   }
 
-  // Use SSE streaming for real-time progress
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: object) => {
@@ -33,30 +35,45 @@ export async function POST(req: NextRequest) {
       };
 
       try {
-        // Step 1: Create destination folder
-        send({ type: 'status', message: `Creando carpeta "${plan.destination_folder_name}"...` });
-        const { folderId, folderUrl } = await createFolder(
-          plan.destination_folder_name,
+        // Step 1: Create MASTER folder
+        send({ type: 'status', message: `Creando carpeta principal "${plan.master_folder_name}"...` });
+        const { folderId: masterFolderId, folderUrl: masterFolderUrl } = await createFolder(
+          plan.master_folder_name,
           token.accessToken as string,
         );
-        send({ type: 'folder_created', folderId, folderUrl, folderName: plan.destination_folder_name });
+        
+        const overallResults: any[] = [];
+        let succeededCount = 0;
+        let failedCount = 0;
 
-        // Step 2: Copy each approved file
-        const results: Array<{ file_id: string; file_name: string; status: string; new_file_id?: string; error?: string }> = [];
+        // Step 2: Iterate through each ITEM (Subfolder)
+        for (const item of plan.items) {
+          const approvedInItem = item.files_to_copy.filter(f => !selectedFileIds || selectedFileIds.includes(f.file_id));
+          if (approvedInItem.length === 0) continue;
 
-        for (const file of approved) {
-          send({ type: 'copying', file_id: file.file_id, file_name: file.file_name });
-          try {
-            const { newFileId, webViewLink } = await copyFile(
-              file.file_id,
-              folderId,
-              token.accessToken as string,
-            );
-            results.push({ file_id: file.file_id, file_name: file.file_name, status: 'done', new_file_id: newFileId });
-            send({ type: 'file_done', file_id: file.file_id, file_name: file.file_name, new_file_id: newFileId, link: webViewLink });
-          } catch (err: any) {
-            results.push({ file_id: file.file_id, file_name: file.file_name, status: 'failed', error: err.message });
-            send({ type: 'file_failed', file_id: file.file_id, file_name: file.file_name, error: err.message });
+          send({ type: 'status', message: `Creando subcarpeta "${item.folder_name}"...` });
+          const { folderId: subFolderId } = await createFolder(
+            item.folder_name,
+            token.accessToken as string,
+            masterFolderId // Parent ID
+          );
+
+          for (const file of approvedInItem) {
+            send({ type: 'copying', file_id: file.file_id, file_name: file.file_name });
+            try {
+              const { newFileId, webViewLink } = await copyFile(
+                file.file_id,
+                subFolderId,
+                token.accessToken as string,
+              );
+              succeededCount++;
+              overallResults.push({ file_id: file.file_id, item_folder: item.folder_name, status: 'done' });
+              send({ type: 'file_done', file_id: file.file_id, file_name: file.file_name, new_file_id: newFileId, link: webViewLink });
+            } catch (err: any) {
+              failedCount++;
+              overallResults.push({ file_id: file.file_id, item_folder: item.folder_name, status: 'failed', error: err.message });
+              send({ type: 'file_failed', file_id: file.file_id, file_name: file.file_name, error: err.message });
+            }
           }
         }
 
@@ -66,11 +83,11 @@ export async function POST(req: NextRequest) {
             const db = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!);
             await db.from('operation_logs').insert({
               user_id: token.sub,
-              operation_type: 'copy_files',
+              operation_type: 'copy_files_organized',
               payload: {
-                destination_folder_id: folderId,
-                destination_folder_name: plan.destination_folder_name,
-                files: results,
+                master_folder_id: masterFolderId,
+                master_folder_name: plan.master_folder_name,
+                results: overallResults,
                 timestamp: new Date().toISOString(),
               },
             });
@@ -81,10 +98,10 @@ export async function POST(req: NextRequest) {
 
         send({
           type: 'complete',
-          total: approved.length,
-          succeeded: results.filter((r) => r.status === 'done').length,
-          failed: results.filter((r) => r.status === 'failed').length,
-          folderUrl,
+          total: totalApproved,
+          succeeded: succeededCount,
+          failed: failedCount,
+          folderUrl: masterFolderUrl,
         });
       } catch (err: any) {
         send({ type: 'error', message: err.message });

@@ -88,8 +88,14 @@ export interface RetrievedChunk {
 
 // ─── Mode 2 — Reference-Based Classification ─────────────────────────────────
 
+export interface ReferenceComponent {
+  description: string;
+  part_number: string;
+  serial_number: string;
+}
+
 export interface ExtractedEntities {
-  entities: string[];
+  components: ReferenceComponent[];
   entity_type: string;
 }
 
@@ -101,9 +107,15 @@ export interface FileToCopy {
   match_score: number;
 }
 
-export interface ClassificationPlan {
-  destination_folder_name: string;
+export interface ClassificationFolder {
+  id: string; // Internal ID for UI keying
+  folder_name: string;
   files_to_copy: FileToCopy[];
+}
+
+export interface ClassificationPlan {
+  master_folder_name: string;
+  items: ClassificationFolder[];
 }
 
 export interface ExecutionResult {

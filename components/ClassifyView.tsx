@@ -18,14 +18,14 @@ export function ClassifyView({ corpusName }: { corpusName: string }) {
   const [progressItems, setProgressItems] = useState<ProgressItem[]>([]);
   const [summary, setSummary] = useState<any>(null);
 
-  async function handleEntitiesConfirmed(entities: string[]) {
+  async function handleComponentsConfirmed(components: any[]) {
     setStep('searching');
     setError(null);
     try {
       const res = await fetch('/api/classify/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entities, corpusName }),
+        body: JSON.stringify({ components, corpusName }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Search failed');
@@ -42,11 +42,17 @@ export function ClassifyView({ corpusName }: { corpusName: string }) {
     setStep('executing');
     setError(null);
 
-    // Initialize progress items
-    const initialItems: ProgressItem[] = plan.files_to_copy
-      .filter((f) => selectedFileIds.includes(f.file_id))
-      .map((f) => ({ file_id: f.file_id, file_name: f.file_name, status: 'pending' }));
-    setProgressItems(initialItems);
+    // Flatten all files from all items to initialize progress
+    const allApprovedFiles: ProgressItem[] = [];
+    plan.items.forEach(item => {
+      item.files_to_copy.forEach(f => {
+        if (!selectedFileIds || selectedFileIds.includes(f.file_id)) {
+          allApprovedFiles.push({ file_id: f.file_id, file_name: f.file_name, status: 'pending' });
+        }
+      });
+    });
+    
+    setProgressItems(allApprovedFiles);
 
     try {
       const res = await fetch('/api/classify/execute', {
@@ -111,7 +117,7 @@ export function ClassifyView({ corpusName }: { corpusName: string }) {
       )}
 
       {step === 'select_doc' && (
-        <ReferenceDocSelector onEntitiesConfirmed={handleEntitiesConfirmed} corpusName={corpusName} />
+        <ReferenceDocSelector onComponentsConfirmed={handleComponentsConfirmed} corpusName={corpusName} />
       )}
 
       {step === 'searching' && (
@@ -124,7 +130,7 @@ export function ClassifyView({ corpusName }: { corpusName: string }) {
       {step === 'review_plan' && plan && (
         <ClassificationPlanUI
           plan={plan}
-          onFolderNameChange={(name) => setPlan({ ...plan, destination_folder_name: name })}
+          onFolderNameChange={(name) => setPlan({ ...plan, master_folder_name: name })}
           onConfirm={handleConfirmPlan}
         />
       )}
