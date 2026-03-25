@@ -154,7 +154,7 @@ export default function Home() {
       )}
 
       {/* Main content */}
-      <main className="flex-1 flex flex-col items-center justify-center p-8">
+      <main className={`flex-1 flex flex-col ${!corpusName ? 'items-center justify-center' : ''} p-8`}>
         {!corpusName ? (
           /* No corpus yet → show indexing panel */
           <IndexingPanel onIndexingComplete={handleIndexingComplete} />

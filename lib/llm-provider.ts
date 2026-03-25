@@ -38,6 +38,7 @@ export function getLLM(provider: ProviderType, modelId: string, locationOverride
     case 'gemini': {
       // Vertex AI SDK on Vercel requires explicit credentials from JSON env var
       const credentialsJson = process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON;
+      const keyFile = process.env.GOOGLE_APPLICATION_CREDENTIALS;
       let googleAuthOptions = undefined;
       
       if (credentialsJson) {
@@ -48,13 +49,15 @@ export function getLLM(provider: ProviderType, modelId: string, locationOverride
         } catch (e) {
           console.error('[LLM ERROR] Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON:', e);
         }
+      } else if (keyFile) {
+        googleAuthOptions = { keyFile };
       }
 
       const location = locationOverride || process.env.VERTEX_AI_LOCATION || 'us-central1';
       console.log(`[LLM/GCP] createVertex project=${process.env.GOOGLE_CLOUD_PROJECT_ID} location=${location}`);
       
       const vertex = createVertex({
-        project: process.env.GOOGLE_CLOUD_PROJECT_ID,
+        project: process.env.GOOGLE_CLOUD_PROJECT_ID as string,
         location,
         googleAuthOptions,
       });

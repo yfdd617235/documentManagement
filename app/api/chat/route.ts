@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
       // ── MODE 1: Conversational Search ──────────────────────────────────────
       const query = latestMessage.content;
       contexts = await retrieveContexts(activeCorpusName, query, 10, 0.7);
-      console.log(`[API/CHAT] Retrieved ${contexts.length} contexts for query: ${query}`);
+      console.log(`[API/CHAT] Retrieved ${contexts.length} contexts for query: ${query} (Corpus: ${activeCorpusName})`);
 
       const formattedContext = contexts.length > 0
         ? contexts.map((c, i) => `[Source ${i + 1}: ${c.file_name}]\n${c.text}\n`).join('\n---\n')
@@ -90,7 +90,9 @@ export async function POST(req: NextRequest) {
 
       return new StreamingTextResponse(result.toAIStream(), {
         headers: {
-          'x-rag-sources': Buffer.from(JSON.stringify(contexts)).toString('base64'),
+          'x-rag-sources': Buffer.from(JSON.stringify(
+            contexts.map(({ text, ...rest }) => rest)
+          )).toString('base64'),
         },
       });
 
@@ -119,6 +121,11 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error('[API/CHAT ERROR]:', error);
-    return new Response(error.message || 'Stream failed', { status: 500 });
+    // Log the full stack trace to terminal
+    if (error.stack) console.error(error.stack);
+    return new Response(JSON.stringify({ error: error.message || 'Stream failed' }), { 
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 }

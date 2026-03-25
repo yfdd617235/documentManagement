@@ -41,27 +41,8 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // --- DEBUG METADATA LOGGER ---
-    try {
-      const driveUrl = `https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed=false&fields=files(id,name,mimeType,size)&supportsAllDrives=true&includeItemsFromAllDrives=true`;
-      const resDrive = await fetch(driveUrl, {
-        headers: { Authorization: `Bearer ${token.accessToken}` },
-      });
-      const dataDrive = await resDrive.json();
-      
-      const fs = require('fs');
-      fs.writeFileSync('C:/Users/ydgs9/Documents/Antigravity/documentManagement/test_drive_meta_dump.json', JSON.stringify(dataDrive.files, null, 2));
-      
-      console.log('--- DRIVE FOLDER CONTENTS ---');
-      console.log(JSON.stringify(dataDrive.files, null, 2));
-      console.log('-----------------------------');
-    } catch (e) {
-      console.error('Failed to peek drive folder', e);
-    }
-    // -----------------------------
-
     // 2) Trigger the long-running import in Vertex AI
-    const operationName = await importDriveFolder(corpusName, folderId);
+    const operationName = await importDriveFolder(corpusName, folderId, token.accessToken as string);
 
     // Record sync time immediately (operation started)
     await updateCorpusSyncTime(token.sub);

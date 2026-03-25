@@ -38,6 +38,8 @@ Thumbs.db
 credentials/
 *.json.key
 service-account*.json
+gcp_keys.json
+cleanup_gcp*.mjs
 
 # Logs
 npm-debug.log*

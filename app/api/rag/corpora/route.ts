@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const corpora = await listAllGlobalCorpora();
+    const corpora = await listAllGlobalCorpora(token.accessToken as string);
     // Shape it for the UI
     const mapped = corpora.map((c: any) => ({
       name: c.name,

@@ -13,6 +13,7 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Settings, LogOut, Sun, Moon, Maximize2, Minimize2, Database, Settings2 } from 'lucide-react';
+import { signOut } from 'next-auth/react';
 import { DriveStatus } from './DriveStatus';
 
 interface HeaderProps {
@@ -102,6 +103,17 @@ export function Header({ onSettingsOpen }: HeaderProps) {
           title="Settings"
         >
           <Settings2 size={16} aria-hidden="true" />
+        </button>
+
+        {/* Sign Out */}
+        <button
+          onClick={() => signOut({ callbackUrl: '/' })}
+          className="btn-ghost p-2 text-red-500 hover:text-red-600"
+          style={{ padding: '6px', borderRadius: '6px' }}
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <LogOut size={16} aria-hidden="true" />
         </button>
       </div>
     </header>

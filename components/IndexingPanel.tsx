@@ -223,7 +223,7 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
   // ── Rescue Manual OCR Loop ───────────────────────────────────────────────
   const handleRescueFiles = async () => {
     if (!state.corpusName || !state.failedIds || state.failedIds.length === 0) return;
-    
+
     setState((prev) => ({ ...prev, step: 'rescuing', progress: 50, error: null }));
     try {
       const res = await fetch('/api/rag/rescue-files', {
@@ -236,11 +236,11 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
 
       if (data.rescuedCount > 0 && data.errors.length === 0) {
         if (data.operationName) {
-          setState((prev) => ({ 
-            ...prev, 
-            step: 'polling', 
-            operationName: data.operationName, 
-            progress: 95, 
+          setState((prev) => ({
+            ...prev,
+            step: 'polling',
+            operationName: data.operationName,
+            progress: 95,
             error: null,
             failedIds: []
           }));
@@ -251,13 +251,13 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
         }
       } else if (data.rescuedCount > 0) {
         setState((prev) => ({
-          ...prev, step: 'error', 
+          ...prev, step: 'error',
           error: `Rescued ${data.rescuedCount} files, but ${data.errors.length} still have issues.`,
           failedIds: data.errors.map((e: any) => e.id)
         }));
       } else {
         setState((prev) => ({
-          ...prev, step: 'error', 
+          ...prev, step: 'error',
           error: `Manual OCR Extraction failed. Please check the console for logs.`,
         }));
       }
@@ -298,13 +298,13 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
       setState((prev) => ({ ...prev, corpusName, progress: 20 }));
 
       // Instantly synchronize the background Dashboard cards with the newly registered Corpus
-      fetch('/api/rag/list-corpora')
+      fetch('/api/rag/corpora')
         .then((r) => r.json())
         .then((data) => setCorpora(data.corpora ?? []));
 
       // Step 2 — Grant access to the now-provisioned service agent
       setState((prev) => ({ ...prev, step: 'granting', progress: 35 }));
-      
+
       const grantRes = await fetch('/api/rag/grant-access', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -454,14 +454,14 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
               <div className="text-sm flex-1" style={{ color: 'var(--danger)' }}>
                 <p className="font-semibold mb-1">Indexing Error</p>
                 <p>{state.error}</p>
-                
+
                 {state.failedIds && state.failedIds.length > 0 && (
                   <div className="mt-4 border-t border-red-900/20 pt-3">
                     <p className="text-xs mb-2 text-[var(--danger)]/80">
-                      Google Cloud API natively rejected these files (Possibly Scanned PDFs without Text Layer). 
+                      Google Cloud API natively rejected these files (Possibly Scanned PDFs without Text Layer).
                       You can force ingestion by using Gemini Vision to optically extract the content.
                     </p>
-                    <button 
+                    <button
                       onClick={handleRescueFiles}
                       className="btn-accent text-xs px-3 py-1.5"
                       style={{ backgroundColor: 'var(--danger)' }}
@@ -494,8 +494,8 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
               {loadingFiles ? (
                 <Loader2 size={13} className="animate-spin" style={{ color: 'var(--accent)' }} />
               ) : (
-                <button 
-                  onClick={() => fetchFiles(state.corpusName!)} 
+                <button
+                  onClick={() => fetchFiles(state.corpusName!)}
                   className="hover:scale-110 mb-1 transition-transform opacity-70 hover:opacity-100"
                   title="Refresh file list"
                 >
@@ -505,9 +505,9 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
             </div>
             <div className="grid grid-cols-1 gap-2 max-h-64 overflow-y-auto pr-1">
               {files.map((file) => (
-                <div 
-                  key={file.name} 
-                  className="flex items-center gap-2 p-2 rounded-lg text-xs transition-colors" 
+                <div
+                  key={file.name}
+                  className="flex items-center gap-2 p-2 rounded-lg text-xs transition-colors"
                   style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}
                 >
                   <div className="w-8 h-8 rounded bg-[var(--accent)]/10 flex items-center justify-center flex-shrink-0">
@@ -536,7 +536,7 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
         <h1 className="text-2xl font-bold mb-4 text-center" style={{ color: 'var(--text-primary)' }}>
           Document Databases
         </h1>
-        
+
         {loadingCorpora ? (
           <div className="text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
             Loading company databases...
@@ -544,8 +544,8 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {corpora.map((corpus) => (
-              <div 
-                key={corpus.name} 
+              <div
+                key={corpus.name}
                 className="card p-5 flex flex-col items-center justify-center gap-3 cursor-pointer transition-transform hover:scale-105"
                 onClick={() => handleSelectCorpus(corpus.name)}
                 style={{ border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-secondary)', position: 'relative' }}
@@ -563,7 +563,7 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
                 >
                   <Trash2 size={16} />
                 </button>
-                
+
                 <Database size={32} style={{ color: 'var(--accent)' }} />
                 <h3 className="font-semibold text-center text-sm" style={{ color: 'var(--text-primary)' }}>
                   {corpus.folderName}
@@ -589,17 +589,17 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
               Delete Shared Database?
             </h2>
             <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-              You are about to delete <strong>{corpusToDelete.folderName}</strong>. 
+              You are about to delete <strong>{corpusToDelete.folderName}</strong>.
               This will affect <strong>the entire company</strong> and all collaborators will lose access to this graphical info immediately.
             </p>
-            
+
             <div className="flex flex-col gap-1 mt-2">
               <label className="text-xs font-semibold" style={{ color: 'var(--danger)' }}>
                 Type DELETE to confirm:
               </label>
-              <input 
-                type="text" 
-                className="input-field" 
+              <input
+                type="text"
+                className="input-field"
                 value={deleteInput}
                 onChange={(e) => setDeleteInput(e.target.value)}
                 placeholder="DELETE"
@@ -612,15 +612,15 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
             )}
 
             <div className="flex justify-end gap-2 mt-2">
-              <button 
-                className="btn-ghost" 
+              <button
+                className="btn-ghost"
                 onClick={() => setCorpusToDelete(null)}
                 disabled={isDeleting}
               >
                 Cancel
               </button>
-              <button 
-                className="btn-primary flex items-center gap-1"
+              <button
+                className="btn-primary flex items-center gap-1 p-2"
                 style={{ backgroundColor: 'var(--danger)', color: 'white', borderColor: 'var(--danger)' }}
                 onClick={handleDeleteCorpus}
                 disabled={isDeleting || deleteInput !== 'DELETE'}

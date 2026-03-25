@@ -41,12 +41,7 @@ export async function DELETE(req: NextRequest) {
     }
 
     if (ragFileName) {
-      // ragFileName must be just the ID part, or the full path. Let's make sure it's the full path
-      const fullPath = ragFileName.includes('projects/')
-        ? ragFileName
-        : `${corpusName}/ragFiles/${ragFileName}`;
-      
-      await deleteRagFile(fullPath);
+      await deleteRagFile(ragFileName);
       return NextResponse.json({ success: true, message: 'File deleted' });
     }
 

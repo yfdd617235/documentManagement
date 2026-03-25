@@ -22,7 +22,8 @@ const GOOGLE_SCOPES = [
   'openid',
   'email',
   'profile',
-  'https://www.googleapis.com/auth/drive',   // full read+write; drive.readonly only reads app-created files
+  'https://www.googleapis.com/auth/drive.readonly',
+  'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/cloud-platform',
 ].join(' ');
 
@@ -80,6 +81,21 @@ export const authOptions: NextAuthOptions = {
 
   // Use JWT strategy (tokens never persisted to a DB — suitable for server-side use)
   session: { strategy: 'jwt' },
+
+  // Make cookies expire when the browser is closed (omitting maxAge)
+  cookies: {
+    sessionToken: {
+      name: process.env.NODE_ENV === 'production' 
+        ? `__Secure-next-auth.session-token` 
+        : `next-auth.session-token`,
+      options: {
+        httpOnly: true,
+        sameSite: 'lax',
+        path: '/',
+        secure: process.env.NODE_ENV === 'production',
+      },
+    },
+  },
 
   callbacks: {
     /**
