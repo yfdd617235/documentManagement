@@ -244,12 +244,12 @@ async function processImport(operationId: string, corpusName: string, folderId: 
       return isNativePdf || isGSuite;
     });
 
-    console.log(`[STAGING] Moving ${filesToProcess.length} files to GCS Staging...`);
-    await getSupabase().from('documents').update({ metadata: { progress: 15, status_text: `Staging ${filesToProcess.length} files...` } }).eq('drive_file_id', operationId);
+    console.log(`[STAGING] High-Speed Streaming of ${filesToProcess.length} files to GCS...`);
+    await getSupabase().from('documents').update({ metadata: { progress: 15, status_text: `Staging ${filesToProcess.length} files (Streaming)...` } }).eq('drive_file_id', operationId);
 
-    // 2. Parallel Copy to GCS (Fast Path)
+    // 2. Parallel Streaming Copy to GCS (Turbo Mode)
     const bucket = storage.bucket(STAGING_BUCKET);
-    const pLimit = 15; // Higher concurrency for cloud-to-cloud copy
+    const pLimit = 30; // High concurrency with streaming to avoid memory pressure
     let stagedCount = 0;
 
     for (let i = 0; i < filesToProcess.length; i += pLimit) {
@@ -262,37 +262,48 @@ async function processImport(operationId: string, corpusName: string, folderId: 
           }
 
           const response = await fetch(downloadUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
-          if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+          if (!response.ok || !response.body) throw new Error(`Download failed: ${response.status}`);
           
           const gcsPath = `${operationId}/${file.id}.pdf`;
           const gcsFile = bucket.file(gcsPath);
           
-          const arrayBuffer = await response.arrayBuffer();
-          await gcsFile.save(Buffer.from(arrayBuffer), {
+          // STREAMING PIPE: Drive -> Node -> GCS
+          // @ts-ignore: Next.js fetch body is a ReadableStream which can be converted or used directly in some Node environments
+          const writeStream = gcsFile.createWriteStream({
             metadata: { 
-              contentType: 'application/pdf', 
-              metadata: { original_name: file.name, folder_id: folderId } 
+               contentType: 'application/pdf', 
+               metadata: { original_name: file.name, folder_id: folderId } 
             }
           });
+
+          // Convert Web ReadableStream to Node stream if needed (standard in newer Node)
+          const nodeBody = response.body as unknown as NodeJS.ReadableStream;
+          await new Promise((resolve, reject) => {
+            // @ts-ignore
+            nodeBody.pipe(writeStream)
+              .on('finish', resolve)
+              .on('error', reject);
+          });
+
           stagedCount++;
         } catch (e) {
           console.error(`Error staging ${file.name}:`, e);
         }
       }));
       
-      const progress = 15 + Math.round((stagedCount / filesToProcess.length) * 40);
+      const progress = 15 + Math.round((stagedCount / filesToProcess.length) * 50);
       await getSupabase().from('documents').update({ 
         metadata: { progress, status_text: `Staging... (${stagedCount}/${filesToProcess.length})` } 
       }).eq('drive_file_id', operationId);
     }
 
-    // 3. Trigger Discovery Engine Import
-    console.log(`[INDEXING] Triggering Vertex Search Import for GCS path: ${operationId}/`);
+    // 3. Trigger Discovery Engine Import (GCS Path)
+    console.log(`[INDEXING] Syncing from GCS to Vertex AI Search: ${operationId}/`);
     await getSupabase().from('documents').update({ 
-      metadata: { progress: 65, status_text: 'Vincular con Motor de Búsqueda...' } 
+      metadata: { progress: 70, status_text: 'Vincular con Motor de Búsqueda...' } 
     }).eq('drive_file_id', operationId);
 
-    const parent = `projects/${PROJECT_ID}/locations/${LOCATION}/collections/default_collection/dataStores/${DATA_STORE_ID}`;
+    const parent = `projects/${PROJECT_ID}/locations/${LOCATION}/collections/default_collection/dataStores/${DATA_STORE_ID}/branches/0`;
     const [operation] = await documentServiceClient.importDocuments({
       parent,
       gcsSource: {
@@ -302,16 +313,11 @@ async function processImport(operationId: string, corpusName: string, folderId: 
       reconciliationMode: 'INCREMENTAL',
     });
 
-    // Fetch meta again to avoid lint error
-    const { data: currentDoc } = await getSupabase().from('documents').select('metadata').eq('drive_file_id', operationId).single();
-    const meta = currentDoc?.metadata as any;
-
-    console.log(`[INDEXING] Started LRO: ${operation.name}`);
+    console.log(`[INDEXING] LRO Started: ${operation.name}`);
     
-    // Save LRO Name for background tracking without breaking the polling ID
+    // Save LRO Name for background tracking
     await getSupabase().from('documents').update({ 
       metadata: { 
-        ...meta,
         progress: 75, 
         status_text: 'Vertex AI indexando en segundo plano...',
         lro_name: operation.name,
@@ -319,13 +325,13 @@ async function processImport(operationId: string, corpusName: string, folderId: 
       } 
     }).eq('drive_file_id', operationId);
 
-    // Update the "Folder" record metadata so it shows as indexed
+    // Update the "Folder" record metadata so it shows as indexing
     await getSupabase().from('documents').upsert({
        drive_file_id: folderId,
        name: corpusName,
        original_path: folderId,
        status: 'indexing'
-    }).then(() => console.log(`Linked folder ${folderId} to index workflow.`));
+    });
 
   } catch (error: any) {
     console.error('[IMPORT FLOW ERROR]', error);
@@ -336,54 +342,54 @@ async function processImport(operationId: string, corpusName: string, folderId: 
   }
 }
 
-export async function pollImportOperation(operationName: string): Promise<ImportOperationStatus> {
-  // Fetch metadata from Supabase for all cases
+export async function pollImportOperation(operationId: string): Promise<ImportOperationStatus> {
+  // Fetch metadata from Supabase
   const { data: op } = await getSupabase()
     .from('documents')
     .select('status, metadata')
-    .eq('drive_file_id', operationName)
+    .eq('drive_file_id', operationId)
     .single();
 
-  const meta = op?.metadata as any;
+  if (!op) return { name: operationId, status: 'FAILED', error: 'Operation not found' };
+  const meta = op.metadata as any;
+  const lroName = meta?.lro_name;
 
-  // If it's a native LRO (starts with projects/...)
-  if (operationName.includes('projects/')) {
-    // Standard Node.js GCP client way to get LRO status if using the helper
-    const operation = await documentServiceClient.checkImportDocumentsProgress(operationName);
+  // If we have a native LRO name, check its progress directly with Google
+  if (lroName) {
+    const operation = await documentServiceClient.checkImportDocumentsProgress(lroName);
+    const opStatus: any = Array.isArray(operation) ? operation[0] : operation;
     
-    // If the helper fails or is missing, we could use the operationsClient, 
-    // but checkImportDocumentsProgress is the documented one for this client.
-    // If it's not a list, it's the operation object.
-    const op: any = Array.isArray(operation) ? operation[0] : operation;
-
     let status: any = 'RUNNING';
-    if (op.done) {
-       status = op.error ? 'FAILED' : 'DONE';
+    if (opStatus.done) {
+       status = opStatus.error ? 'FAILED' : 'DONE';
     }
 
     // Keep Supabase in sync
     await getSupabase().from('documents').update({
        status: status === 'DONE' ? 'complete' : (status === 'FAILED' ? 'error' : 'indexing'),
-       metadata: { ...meta, progress: op.done ? 100 : 85, status_text: op.done ? 'Indexing complete' : 'Vertex Search is processing...' }
-    }).eq('drive_file_id', operationName);
+       metadata: { 
+         ...meta, 
+         progress: opStatus.done ? 100 : 80, 
+         status_text: opStatus.done ? 'Indexado Completado' : 'Google está procesando los archivos...' 
+       }
+    }).eq('drive_file_id', operationId);
 
     return {
-      name: operationName,
+      name: operationId,
       status,
-      progress: op.done ? 100 : 85,
+      progress: opStatus.done ? 100 : 80,
       statusText: meta?.status_text,
-      error: op.error?.message
+      error: opStatus.error?.message
     };
   }
 
-  if (!op) return { name: operationName, status: 'FAILED', error: 'Operation not found' };
-  
+  // Fallback for cases where LRO hasn't started yet
   let mappedStatus = 'RUNNING';
   if (op.status === 'complete') mappedStatus = 'DONE';
   if (op.status === 'error') mappedStatus = 'FAILED';
 
   return {
-    name: operationName,
+    name: operationId,
     status: mappedStatus as any,
     progress: meta?.progress ?? 0,
     statusText: meta?.status_text,

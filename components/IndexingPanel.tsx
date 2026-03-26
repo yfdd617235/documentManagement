@@ -48,13 +48,13 @@ interface IndexingState {
 
 const STEP_LABELS: Record<IndexingStep, string> = {
   idle: '',
-  granting: 'Granting access to Vertex AI service agent…',
-  creating_corpus: 'Creating RAG corpus…',
-  importing: 'Starting import…',
-  polling: 'Indexing documents…',
-  done: 'Corpus ready',
-  error: 'Indexing failed',
-  rescuing: 'Rescuing files via Manual OCR (Gemini)…',
+  granting: 'Verificando permisos de Google...',
+  creating_corpus: 'Inicializando base de conocimientos...',
+  importing: 'Transfiriendo archivos (Turbo Mode)...',
+  polling: 'Google está indexando el contenido...',
+  done: 'Base de datos lista',
+  error: 'Error en la indexación',
+  rescuing: 'Rescatando archivos mediante OCR...',
 };
 
 interface CorpusObj {
