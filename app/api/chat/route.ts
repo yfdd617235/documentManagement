@@ -47,10 +47,17 @@ export async function POST(req: NextRequest) {
   
   // 2. Get active Corpus — prefer client-supplied value over DB lookup
   const dbCorpus = await getCorpusForUser(token.sub);
-  const activeCorpusName = corpusName || dbCorpus?.corpus_name;
+  let activeCorpusName = corpusName || dbCorpus?.corpus_name;
 
   if (!activeCorpusName) {
-    return new Response('No matching corpus found. Please index a folder first.', { status: 400 });
+    // Fallback: Just grab the first available database to prevent chat failing purely on missing state
+    const { listAllGlobalCorpora } = await import('@/lib/rag-engine');
+    const allCorpora = await listAllGlobalCorpora(token.accessToken as string);
+    if (allCorpora.length > 0) {
+      activeCorpusName = allCorpora[0].name;
+    } else {
+      return new Response('No matching corpus found. Please index a folder first.', { status: 400 });
+    }
   }
 
   try {

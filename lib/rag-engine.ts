@@ -11,11 +11,6 @@ import { createClient } from '@supabase/supabase-js';
 import { VertexAI } from '@google-cloud/vertexai';
 import type { RetrievedChunk, ImportOperationStatus } from '@/types';
 
-// ─── In-Memory Operation Tracking ─────────────────────────────────────────────
-// Replaces the 'import_operations' table which has PostgREST cache issues.
-// Safe for Vercel: import process + polling share the same Node.js process lifetime.
-const _operationsMap = new Map<string, { status: string; progress: number; error?: string }>();
-
 // ─── Environment & Clients ────────────────────────────────────────────────────
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -97,6 +92,8 @@ export async function listAllGlobalCorpora(accessToken?: string): Promise<any[]>
   const uniqueFolders = new Map();
   for (const doc of docs) {
     const folderId = doc.original_path;
+    if (!folderId || folderId === 'OPERATION_TRACKER') continue;
+    
     if (!uniqueFolders.has(folderId)) {
       let fName = (doc.metadata as any)?.folder_name || 'Carpeta de Drive Indexada';
       
@@ -206,8 +203,14 @@ function chunkText(text: string, size = 2000, overlap = 200): string[] {
 export async function importDriveFolder(corpusName: string, folderId: string, accessToken: string): Promise<string> {
   const operationId = `op-${Date.now()}`;
   
-  // Track in memory (no DB dependency)
-  _operationsMap.set(operationId, { status: 'RUNNING', progress: 0 });
+  // Track in documents table (DB dependency, avoids serverless memory wipe)
+  await getSupabase().from('documents').upsert({
+    drive_file_id: operationId,
+    name: 'IMPORT_OPERATION',
+    original_path: 'OPERATION_TRACKER',
+    status: 'indexing',
+    metadata: { progress: 0 }
+  });
 
   // Start background process (don't await)
   processImport(operationId, corpusName, folderId, accessToken).catch(console.error);
@@ -364,35 +367,47 @@ async function processImport(operationId: string, corpusName: string, folderId: 
 
       await getSupabase().from('documents').update({ status: 'complete' }).eq('id', documentUuid);
 
-      _operationsMap.set(operationId, {
-        status: 'RUNNING',
-        progress: Math.round(((i + 1) / files.length) * 100)
-      });
+      // update operation
+      await getSupabase().from('documents').update({
+        metadata: { progress: Math.round(((i + 1) / files.length) * 100) }
+      }).eq('drive_file_id', operationId);
     }
 
-    _operationsMap.set(operationId, { status: 'DONE', progress: 100 });
+    await getSupabase().from('documents').update({
+      status: 'complete',
+      metadata: { progress: 100 }
+    }).eq('drive_file_id', operationId);
     console.log(`[RAG IMPORT] Operation ${operationId} completed successfully.`);
 
   } catch (error: any) {
     console.error('[RAG IMPORT ERROR]', error);
-    _operationsMap.set(operationId, {
-      status: 'FAILED',
-      progress: 0,
-      error: error.message
-    });
+    await getSupabase().from('documents').update({
+      status: 'error',
+      metadata: { progress: 0, error: error.message }
+    }).eq('drive_file_id', operationId);
   }
 }
 
 export async function pollImportOperation(operationName: string): Promise<ImportOperationStatus> {
-  const op = _operationsMap.get(operationName);
+  const { data: op } = await getSupabase()
+    .from('documents')
+    .select('status, metadata')
+    .eq('drive_file_id', operationName)
+    .single();
   
   if (!op) return { name: operationName, status: 'FAILED', error: 'Operation not found' };
   
+  let mappedStatus = 'RUNNING';
+  if (op.status === 'complete') mappedStatus = 'DONE';
+  if (op.status === 'error') mappedStatus = 'FAILED';
+
+  const meta = op.metadata as any;
+
   return {
     name: operationName,
-    status: op.status as any,
-    progress: op.progress,
-    error: op.error
+    status: mappedStatus as any,
+    progress: meta?.progress ?? 0,
+    error: meta?.error
   };
 }
 

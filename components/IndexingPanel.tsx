@@ -302,30 +302,7 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
         .then((r) => r.json())
         .then((data) => setCorpora(data.corpora ?? []));
 
-      // Step 2 — Grant access to the now-provisioned service agent
-      setState((prev) => ({ ...prev, step: 'granting', progress: 35 }));
-
-      const grantRes = await fetch('/api/rag/grant-access', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folderId: trimmedId }),
-      });
-      const grantData = await grantRes.json();
-
-      if (!grantRes.ok) {
-        if (grantData.error === 'shared_drive') {
-          setState((prev) => ({
-            ...prev,
-            step: 'error',
-            error: grantData.message,
-            errorInstructions: grantData.instructions,
-          }));
-          return;
-        }
-        throw new Error(grantData.message ?? 'Failed to grant folder access.');
-      }
-
-      // Step 3 — Start import
+      // Step 2 — Start import
       setState((prev) => ({ ...prev, step: 'importing', progress: 40 }));
 
       const importRes = await fetch('/api/rag/import-files', {

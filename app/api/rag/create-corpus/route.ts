@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // 1. Check if this folder has already been indexed globally by ANY user in the company
-    const corpora = await listAllGlobalCorpora();
+    const corpora = await listAllGlobalCorpora(accessToken);
     const existing = corpora.find((c) => c.displayName === `company-kb-${folderId}`);
     
     if (existing) {
@@ -63,8 +63,13 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Fetch the human-readable folder name from Google Drive
-    const meta = await getFileMetadata(folderId, accessToken);
-    const folderName = meta.name;
+    let folderName = 'Carpeta Compartida';
+    try {
+      const meta = await getFileMetadata(folderId, accessToken);
+      if (meta.name) folderName = meta.name;
+    } catch (e) {
+      console.warn('[Create Corpus] Could not fetch folder metadata, falling back to default', e);
+    }
 
     // 3. Create new global corpus
     const corpusName = await createCorpus(folderId, folderName);
