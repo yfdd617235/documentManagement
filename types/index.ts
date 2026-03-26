@@ -28,6 +28,7 @@ export interface ImportOperationStatus {
   name: string;          // operation name or full resource name
   status: 'RUNNING' | 'DONE' | 'FAILED';
   progress?: number;     // 0-100
+  statusText?: string;   // Descriptive text (e.g. "Staging files...")
   error?: string;
   failedIds?: string[];
 }

@@ -13,6 +13,8 @@
     "@ai-sdk/google-vertex": "^0.0.40",
     "@ai-sdk/openai": "^0.0.40",
     "@ai-sdk/react": "^3.0.1",
+    "@google-cloud/discoveryengine": "^2.6.0",
+    "@google-cloud/storage": "^7.19.0",
     "@google-cloud/vertexai": "^1.9.3",
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.99.3",

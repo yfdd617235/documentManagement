@@ -37,6 +37,7 @@ type IndexingStep =
 interface IndexingState {
   step: IndexingStep;
   progress: number;           // 0-100
+  statusText?: string;       // Descriptive status for long operations
   corpusName: string | null;
   operationName: string | null;
   error: string | null;
@@ -199,6 +200,7 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
             ...prev,
             step: 'polling',
             progress: data.progress ?? prev.progress,
+            statusText: data.statusText ?? prev.statusText,
           }));
         }
       } catch {
@@ -379,8 +381,8 @@ export function IndexingPanel({ onIndexingComplete }: IndexingPanelProps) {
         {state.step !== 'idle' && state.step !== 'error' && (
           <div className="card p-4 flex flex-col gap-3">
             <div className="flex items-center justify-between text-xs" style={{ color: 'var(--text-secondary)' }}>
-              <span>{STEP_LABELS[state.step]}</span>
-              {state.step === 'polling' && state.progress > 0 && (
+              <span>{state.statusText || STEP_LABELS[state.step]}</span>
+              {state.progress > 0 && (
                 <span>{state.progress}%</span>
               )}
             </div>

@@ -8,10 +8,20 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { VertexAI } from '@google-cloud/vertexai';
+import { DocumentServiceClient, SearchServiceClient } from '@google-cloud/discoveryengine';
+import { Storage } from '@google-cloud/storage';
 import type { RetrievedChunk, ImportOperationStatus } from '@/types';
 
-// ─── Environment & Clients ────────────────────────────────────────────────────
+// ─── Constants & Configuration ────────────────────────────────────────────────
+const ENGINE_ID = process.env.VERTEX_SEARCH_ENGINE_ID || 'docintel-search-docs_1774558903972';
+const DATA_STORE_ID = process.env.VERTEX_SEARCH_DATA_STORE_ID || 'docintel-datastore_1774558753918';
+const STAGING_BUCKET = process.env.GCS_STAGING_BUCKET || 'docintel-documents-490723';
+const PROJECT_ID = process.env.GOOGLE_CLOUD_PROJECT_ID || 'documentmanagement-490723';
+const LOCATION = 'global'; 
+
+const storage = new Storage({ keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS });
+const documentServiceClient = new DocumentServiceClient({ keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS });
+const searchServiceClient = new SearchServiceClient({ keyFilename: process.env.GOOGLE_APPLICATION_CREDENTIALS });
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -185,21 +195,6 @@ export async function grantRagAgentDriveAccess(folderId: string, userAccessToken
 
 // ─── File Import & Processing ─────────────────────────────────────────────────
 
-/**
- * Logic of chunking: 512 tokens (~2000 chars), 50 tokens (~200 chars) overlap.
- */
-function chunkText(text: string, size = 2000, overlap = 200): string[] {
-  const chunks: string[] = [];
-  let start = 0;
-  while (start < text.length) {
-    const end = Math.min(start + size, text.length);
-    chunks.push(text.substring(start, end));
-    if (end === text.length) break;
-    start += size - overlap;
-  }
-  return chunks;
-}
-
 export async function importDriveFolder(corpusName: string, folderId: string, accessToken: string): Promise<string> {
   const operationId = `op-${Date.now()}`;
   
@@ -218,41 +213,12 @@ export async function importDriveFolder(corpusName: string, folderId: string, ac
   return operationId;
 }
 
-async function getEmbeddingsBatch(texts: string[]): Promise<number[][]> {
-  const project = process.env.GOOGLE_CLOUD_PROJECT_ID!;
-  const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
-  const token = await getAdcToken();
-  const url = `https://${location}-aiplatform.googleapis.com/v1/projects/${project}/locations/${location}/publishers/google/models/${EMBEDDING_MODEL}:predict`;
-
-  const data = await fetchWithRetry(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      instances: texts.map(t => ({ content: t })),
-    }),
-  });
-
-  return data.predictions.map((p: any) => p.embeddings.values);
-}
-
 async function processImport(operationId: string, corpusName: string, folderId: string, accessToken: string) {
   try {
-    // 0. Get Folder Metadata (to get the name)
-    let folderName = 'Carpeta de Drive';
-    try {
-      const folderMeta = await fetchWithRetry(
-        `https://www.googleapis.com/drive/v3/files/${folderId}?fields=name&supportsAllDrives=true`,
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-      folderName = folderMeta.name;
-    } catch (e) {
-      console.warn('Could not fetch folder name', e);
-    }
-    
-    // Recursive file discovery helper
+    // 0. Update status to 'Discovering'
+    await getSupabase().from('documents').update({ metadata: { progress: 5, status_text: 'Discovering files...' } }).eq('drive_file_id', operationId);
+
+    // 1. Recursive file discovery helper
     const getAllFilesRecursive = async (fid: string): Promise<any[]> => {
       const res = await fetchWithRetry(
         `https://www.googleapis.com/drive/v3/files?q='${fid}' in parents and trashed=false&fields=files(id,name,mimeType)&supportsAllDrives=true&includeItemsFromAllDrives=true`,
@@ -262,7 +228,6 @@ async function processImport(operationId: string, corpusName: string, folderId: 
       let allFiles: any[] = [];
       for (const item of items) {
         if (item.mimeType === 'application/vnd.google-apps.folder') {
-          console.log(`Found subfolder: ${item.name} (ID: ${item.id}). Scanning...`);
           const subFiles = await getAllFilesRecursive(item.id);
           allFiles = allFiles.concat(subFiles);
         } else {
@@ -273,128 +238,97 @@ async function processImport(operationId: string, corpusName: string, folderId: 
     };
 
     const files = await getAllFilesRecursive(folderId);
-
     const filesToProcess = files.filter((f: any) => {
       const isGSuite = f.mimeType.startsWith('application/vnd.google-apps.');
       const isNativePdf = f.mimeType === 'application/pdf';
-      if (!isNativePdf && !isGSuite) {
-        console.log(`Skipping non-compatible file: ${f.name} (${f.mimeType})`);
-        return false;
-      }
-      return true;
+      return isNativePdf || isGSuite;
     });
 
-    console.log(`Discovery complete. Found ${filesToProcess.length} valid items in tree.`);
-    let completedCount = 0;
+    console.log(`[STAGING] Moving ${filesToProcess.length} files to GCS Staging...`);
+    await getSupabase().from('documents').update({ metadata: { progress: 15, status_text: `Staging ${filesToProcess.length} files...` } }).eq('drive_file_id', operationId);
 
-    // Helper for parallel mapping with concurrency limit
-    const pLimit = 5; // Process 5 PDFs entirely in parallel
+    // 2. Parallel Copy to GCS (Fast Path)
+    const bucket = storage.bucket(STAGING_BUCKET);
+    const pLimit = 15; // Higher concurrency for cloud-to-cloud copy
+    let stagedCount = 0;
+
     for (let i = 0; i < filesToProcess.length; i += pLimit) {
       const batch = filesToProcess.slice(i, i + pLimit);
-      
       await Promise.all(batch.map(async (file: any) => {
         try {
-          console.log(`Processing file: ${file.name} (ID: ${file.id})`);
+          let downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+          if (file.mimeType.startsWith('application/vnd.google-apps.')) {
+            downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=application/pdf`;
+          }
 
-          // 2. [Upsert] Document record
-          const { data: docRecord, error: docError } = await getSupabase()
-            .from('documents')
-            .upsert({
-              drive_file_id: file.id,
-              name: file.name,
-              original_path: folderId,
-              status: 'indexing',
-              metadata: { folder_name: folderName }
-            }, { onConflict: 'drive_file_id' })
-            .select()
-            .single();
+          const response = await fetch(downloadUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+          if (!response.ok) throw new Error(`Download failed: ${response.status}`);
           
-          if (docError) {
-            console.error('[SUPABASE DOC ERROR]', docError);
-            return; // skip file if record failed
-          }
-
-          const documentUuid = docRecord.id;
-
-          // 3. Download/Parse
-          let content = '';
-          try {
-            let downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
-            if (file.mimeType.startsWith('application/vnd.google-apps.')) {
-              downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=application/pdf`;
-            }
-
-            const downloadRes = await fetch(downloadUrl, {
-              headers: { Authorization: `Bearer ${accessToken}` }
-            });
-            if (!downloadRes.ok) throw new Error(`Failed download: ${downloadRes.status}`);
-            
-            const buffer = Buffer.from(await downloadRes.arrayBuffer());
-            const pdf = (await import('pdf-parse')).default;
-            const parsed = await pdf(buffer);
-            content = parsed.text;
-            
-            if (!content || content.trim().length === 0) {
-              throw new Error('PDF yielded no text content');
-            }
-          } catch (e: any) {
-            console.error(`[PDF PARSE ERROR] ${file.name}:`, e.message);
-            await getSupabase().from('documents').update({ 
-              status: 'error', 
-              metadata: { ...((docRecord?.metadata as any) || {}), error: e.message } 
-            }).eq('id', documentUuid);
-            return;
-          }
-
-          const chunks = chunkText(content);
-          console.log(`Splitting ${file.name} into ${chunks.length} chunks...`);
+          const gcsPath = `${operationId}/${file.id}.pdf`;
+          const gcsFile = bucket.file(gcsPath);
           
-          const BATCH_SIZE = 15;
-          for (let j = 0; j < chunks.length; j += BATCH_SIZE) {
-            const chunkBatch = chunks.slice(j, j + BATCH_SIZE);
-            const embeddings = await getEmbeddingsBatch(chunkBatch);
-
-            const rows = chunkBatch.map((text, idx) => ({
-              document_id: documentUuid,
-              content: text,
-              embedding: embeddings[idx],
-              metadata: {
-                file_name: file.name,
-                file_id: file.id,
-                chunk_index: j + idx,
-                total_chunks: chunks.length
-              }
-            }));
-
-            const { error: insertError } = await getSupabase()
-              .from('document_chunks')
-              .insert(rows);
-
-            if (insertError) {
-               throw new Error(`Failed to store chunks: ${insertError.message}`);
+          const arrayBuffer = await response.arrayBuffer();
+          await gcsFile.save(Buffer.from(arrayBuffer), {
+            metadata: { 
+              contentType: 'application/pdf', 
+              metadata: { original_name: file.name, folder_id: folderId } 
             }
-          }
-
-          await getSupabase().from('documents').update({ status: 'complete' }).eq('id', documentUuid);
-        } catch (e: any) {
-          console.error(`[FILE PROCESS ERR] ${file.name}:`, e);
-        } finally {
-          completedCount++;
-          await getSupabase().from('documents').update({
-            metadata: { progress: Math.min(99, Math.round((completedCount / filesToProcess.length) * 100)) }
-          }).eq('drive_file_id', operationId);
+          });
+          stagedCount++;
+        } catch (e) {
+          console.error(`Error staging ${file.name}:`, e);
         }
       }));
+      
+      const progress = 15 + Math.round((stagedCount / filesToProcess.length) * 40);
+      await getSupabase().from('documents').update({ 
+        metadata: { progress, status_text: `Staging... (${stagedCount}/${filesToProcess.length})` } 
+      }).eq('drive_file_id', operationId);
     }
 
-    await getSupabase().from('documents').update({
-      status: 'complete',
-      metadata: { progress: 100 }
+    // 3. Trigger Discovery Engine Import
+    console.log(`[INDEXING] Triggering Vertex Search Import for GCS path: ${operationId}/`);
+    await getSupabase().from('documents').update({ 
+      metadata: { progress: 65, status_text: 'Vincular con Motor de Búsqueda...' } 
     }).eq('drive_file_id', operationId);
-    console.log(`[RAG IMPORT] Operation ${operationId} completed successfully.`);
+
+    const parent = `projects/${PROJECT_ID}/locations/${LOCATION}/collections/default_collection/dataStores/${DATA_STORE_ID}`;
+    const [operation] = await documentServiceClient.importDocuments({
+      parent,
+      gcsSource: {
+        inputUris: [`gs://${STAGING_BUCKET}/${operationId}/*.pdf`],
+        dataSchema: 'document',
+      },
+      reconciliationMode: 'INCREMENTAL',
+    });
+
+    // Fetch meta again to avoid lint error
+    const { data: currentDoc } = await getSupabase().from('documents').select('metadata').eq('drive_file_id', operationId).single();
+    const meta = currentDoc?.metadata as any;
+
+    console.log(`[INDEXING] Started LRO: ${operation.name}`);
+    
+    // Save LRO Name for background tracking without breaking the polling ID
+    await getSupabase().from('documents').update({ 
+      metadata: { 
+        ...meta,
+        progress: 75, 
+        status_text: 'Vertex AI indexando en segundo plano...',
+        lro_name: operation.name,
+        original_op: operationId 
+      } 
+    }).eq('drive_file_id', operationId);
+
+    // Update the "Folder" record metadata so it shows as indexed
+    await getSupabase().from('documents').upsert({
+       drive_file_id: folderId,
+       name: corpusName,
+       original_path: folderId,
+       status: 'indexing'
+    }).then(() => console.log(`Linked folder ${folderId} to index workflow.`));
 
   } catch (error: any) {
-    console.error('[RAG IMPORT ERROR]', error);
+    console.error('[IMPORT FLOW ERROR]', error);
     await getSupabase().from('documents').update({
       status: 'error',
       metadata: { progress: 0, error: error.message }
@@ -403,29 +337,61 @@ async function processImport(operationId: string, corpusName: string, folderId: 
 }
 
 export async function pollImportOperation(operationName: string): Promise<ImportOperationStatus> {
+  // Fetch metadata from Supabase for all cases
   const { data: op } = await getSupabase()
     .from('documents')
     .select('status, metadata')
     .eq('drive_file_id', operationName)
     .single();
-  
+
+  const meta = op?.metadata as any;
+
+  // If it's a native LRO (starts with projects/...)
+  if (operationName.includes('projects/')) {
+    // Standard Node.js GCP client way to get LRO status if using the helper
+    const operation = await documentServiceClient.checkImportDocumentsProgress(operationName);
+    
+    // If the helper fails or is missing, we could use the operationsClient, 
+    // but checkImportDocumentsProgress is the documented one for this client.
+    // If it's not a list, it's the operation object.
+    const op: any = Array.isArray(operation) ? operation[0] : operation;
+
+    let status: any = 'RUNNING';
+    if (op.done) {
+       status = op.error ? 'FAILED' : 'DONE';
+    }
+
+    // Keep Supabase in sync
+    await getSupabase().from('documents').update({
+       status: status === 'DONE' ? 'complete' : (status === 'FAILED' ? 'error' : 'indexing'),
+       metadata: { ...meta, progress: op.done ? 100 : 85, status_text: op.done ? 'Indexing complete' : 'Vertex Search is processing...' }
+    }).eq('drive_file_id', operationName);
+
+    return {
+      name: operationName,
+      status,
+      progress: op.done ? 100 : 85,
+      statusText: meta?.status_text,
+      error: op.error?.message
+    };
+  }
+
   if (!op) return { name: operationName, status: 'FAILED', error: 'Operation not found' };
   
   let mappedStatus = 'RUNNING';
   if (op.status === 'complete') mappedStatus = 'DONE';
   if (op.status === 'error') mappedStatus = 'FAILED';
 
-  const meta = op.metadata as any;
-
   return {
     name: operationName,
     status: mappedStatus as any,
     progress: meta?.progress ?? 0,
+    statusText: meta?.status_text,
     error: meta?.error
   };
 }
 
-// ─── Context Retrieval ────────────────────────────────────────────────────────
+// ─── Context Retrieval (Vertex AI Search) ─────────────────────────────────────
 
 export async function retrieveContexts(
   corpusName: string,
@@ -433,61 +399,33 @@ export async function retrieveContexts(
   topK: number = 5,
   distanceThreshold: number = 0.8
 ): Promise<RetrievedChunk[]> {
-  // 1. Generate Query Embedding
-  const queryEmbeddings = await getEmbeddingsBatch([query]);
-  const queryEmbedding = queryEmbeddings[0];
+  const servingConfig = `projects/${PROJECT_ID}/locations/${LOCATION}/collections/default_collection/engines/${ENGINE_ID}/servingConfigs/default_serving_config`;
 
-  // 2. Search Supabase via RPC
-  const { data: matches, error } = await getSupabase().rpc('match_documents', {
-    query_embedding: queryEmbedding,
-    match_threshold: Math.max(0.2, 1 - distanceThreshold),
-    match_count: Math.max(topK * 2, 20) // Search more to allow filtering
+  const [response] = await searchServiceClient.search({
+    servingConfig,
+    query,
+    pageSize: topK,
+    contentSearchSpec: {
+      snippetSpec: { returnSnippet: true },
+      summarySpec: { summaryResultCount: 5, includeCitations: true }
+    }
   });
 
-  if (error || !matches) {
-    console.error('[SUPABASE SEARCH ERROR]', error || 'No matches');
-    return [];
-  }
+  const results = response as any[];
 
-  // 3. Fetch full metadata including the context and the parent document's folder_id
-  const ids = matches.map((m: any) => m.id);
-  const { data: detailedChunks, error: detailError } = await getSupabase()
-    .from('document_chunks')
-    .select(`
-      id,
-      documents!inner (
-        name,
-        drive_file_id,
-        original_path
-      )
-    `)
-    .in('id', ids);
-  
-  if (detailError || !detailedChunks) {
-    console.error('[SUPABASE DETAIL ERROR]', detailError);
-    return [];
-  }
+  if (!results || results.length === 0) return [];
 
-  // 4. Filter by Corpus and Map to results
-  const folderId = corpusName.replace('supabase-corpus-', '');
-  
-  const results = matches.map((m: any) => {
-    const detail = detailedChunks.find((dc: any) => dc.id === m.id);
-    if (!detail) return null;
+  return results.map((res: any) => {
+    const doc = res.document;
+    const metadata = doc?.structData;
     
-    // Corpus Filter
-    const doc = detail.documents as any;
-    if (doc?.original_path !== folderId) return null;
-
     return {
-      text: m.content,
-      file_name: doc.name || 'Archivo sin nombre',
-      drive_url: buildDriveUrl(doc.drive_file_id || ''),
-      score: m.similarity
+      text: res.snippet || doc?.derivedStructData?.snippets?.[0]?.snippet || 'Sin vista previa disponible.',
+      file_name: metadata?.original_name || doc?.id || 'Documento de Google',
+      drive_url: metadata?.folder_id ? `https://drive.google.com/drive/folders/${metadata.folder_id}` : '',
+      score: res.relevanceScore || 1.0
     };
-  }).filter(Boolean);
-
-  return (results as any[]).slice(0, topK);
+  });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
