@@ -273,111 +273,118 @@ async function processImport(operationId: string, corpusName: string, folderId: 
     };
 
     const files = await getAllFilesRecursive(folderId);
-    console.log(`Discovery complete. Found ${files.length} total items in tree.`);
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
-      let mimeType = file.mimeType;
-      
-      // Support for Google Docs/Sheets (Export to PDF)
-      const isGSuite = mimeType.startsWith('application/vnd.google-apps.');
-      const isNativePdf = mimeType === 'application/pdf';
-      
+    const filesToProcess = files.filter((f: any) => {
+      const isGSuite = f.mimeType.startsWith('application/vnd.google-apps.');
+      const isNativePdf = f.mimeType === 'application/pdf';
       if (!isNativePdf && !isGSuite) {
-        console.log(`Skipping non-compatible file: ${file.name} (${mimeType})`);
-        continue;
+        console.log(`Skipping non-compatible file: ${f.name} (${f.mimeType})`);
+        return false;
       }
-      console.log(`Processing file: ${file.name} (ID: ${file.id})`);
+      return true;
+    });
 
-      // 2. [Upsert] Document record
-      const { data: docRecord, error: docError } = await getSupabase()
-        .from('documents')
-        .upsert({
-          drive_file_id: file.id,
-          name: file.name,
-          original_path: folderId, // mapping original_path to folderId (as corpus)
-          status: 'indexing',
-          metadata: { folder_name: folderName }
-        }, { onConflict: 'drive_file_id' })
-        .select()
-        .single();
+    console.log(`Discovery complete. Found ${filesToProcess.length} valid items in tree.`);
+    let completedCount = 0;
+
+    // Helper for parallel mapping with concurrency limit
+    const pLimit = 5; // Process 5 PDFs entirely in parallel
+    for (let i = 0; i < filesToProcess.length; i += pLimit) {
+      const batch = filesToProcess.slice(i, i + pLimit);
       
-      if (docError) {
-        console.error('[SUPABASE DOC ERROR]', docError);
-        continue; // skip file if record failed
-      }
+      await Promise.all(batch.map(async (file: any) => {
+        try {
+          console.log(`Processing file: ${file.name} (ID: ${file.id})`);
 
-      const documentUuid = docRecord.id;
-
-      // 3. Download/Parse (NOW REAL)
-      let content = '';
-      try {
-        let downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
-        
-        // Use Export API for GSuite files
-        if (isGSuite) {
-          downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=application/pdf`;
-        }
-
-        const downloadRes = await fetch(downloadUrl, {
-          headers: { Authorization: `Bearer ${accessToken}` }
-        });
-        if (!downloadRes.ok) throw new Error(`Failed download: ${downloadRes.status}`);
-        
-        const buffer = Buffer.from(await downloadRes.arrayBuffer());
-        const pdf = (await import('pdf-parse')).default;
-        const parsed = await pdf(buffer);
-        content = parsed.text;
-        
-        if (!content || content.trim().length === 0) {
-          throw new Error('PDF yielded no text content');
-        }
-      } catch (e: any) {
-        console.error(`[PDF PARSE ERROR] ${file.name}:`, e.message);
-        await getSupabase().from('documents').update({ 
-          status: 'error', 
-          metadata: { ...((docRecord.metadata as any) || {}), error: e.message } 
-        }).eq('id', documentUuid);
-        continue;
-      }
-
-      const chunks = chunkText(content);
-      console.log(`Splitting ${file.name} into ${chunks.length} chunks...`);
-      
-      // We must stay strictly under the 20,000 token limit of text-embedding-004
-      const BATCH_SIZE = 15;
-      for (let j = 0; j < chunks.length; j += BATCH_SIZE) {
-        const chunkBatch = chunks.slice(j, j + BATCH_SIZE);
-        const embeddings = await getEmbeddingsBatch(chunkBatch);
-
-        const rows = chunkBatch.map((text, idx) => ({
-          document_id: documentUuid,
-          content: text,
-          embedding: embeddings[idx],
-          metadata: {
-            file_name: file.name,
-            file_id: file.id,
-            chunk_index: j + idx,
-            total_chunks: chunks.length
+          // 2. [Upsert] Document record
+          const { data: docRecord, error: docError } = await getSupabase()
+            .from('documents')
+            .upsert({
+              drive_file_id: file.id,
+              name: file.name,
+              original_path: folderId,
+              status: 'indexing',
+              metadata: { folder_name: folderName }
+            }, { onConflict: 'drive_file_id' })
+            .select()
+            .single();
+          
+          if (docError) {
+            console.error('[SUPABASE DOC ERROR]', docError);
+            return; // skip file if record failed
           }
-        }));
 
-        const { error: insertError } = await getSupabase()
-          .from('document_chunks')
-          .insert(rows);
+          const documentUuid = docRecord.id;
 
-        if (insertError) {
-          console.error('[SUPABASE BULK INSERT ERROR]', insertError);
-          throw new Error(`Failed to store batch of chunks for ${file.name}: ${insertError.message}`);
+          // 3. Download/Parse
+          let content = '';
+          try {
+            let downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+            if (file.mimeType.startsWith('application/vnd.google-apps.')) {
+              downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=application/pdf`;
+            }
+
+            const downloadRes = await fetch(downloadUrl, {
+              headers: { Authorization: `Bearer ${accessToken}` }
+            });
+            if (!downloadRes.ok) throw new Error(`Failed download: ${downloadRes.status}`);
+            
+            const buffer = Buffer.from(await downloadRes.arrayBuffer());
+            const pdf = (await import('pdf-parse')).default;
+            const parsed = await pdf(buffer);
+            content = parsed.text;
+            
+            if (!content || content.trim().length === 0) {
+              throw new Error('PDF yielded no text content');
+            }
+          } catch (e: any) {
+            console.error(`[PDF PARSE ERROR] ${file.name}:`, e.message);
+            await getSupabase().from('documents').update({ 
+              status: 'error', 
+              metadata: { ...((docRecord?.metadata as any) || {}), error: e.message } 
+            }).eq('id', documentUuid);
+            return;
+          }
+
+          const chunks = chunkText(content);
+          console.log(`Splitting ${file.name} into ${chunks.length} chunks...`);
+          
+          const BATCH_SIZE = 15;
+          for (let j = 0; j < chunks.length; j += BATCH_SIZE) {
+            const chunkBatch = chunks.slice(j, j + BATCH_SIZE);
+            const embeddings = await getEmbeddingsBatch(chunkBatch);
+
+            const rows = chunkBatch.map((text, idx) => ({
+              document_id: documentUuid,
+              content: text,
+              embedding: embeddings[idx],
+              metadata: {
+                file_name: file.name,
+                file_id: file.id,
+                chunk_index: j + idx,
+                total_chunks: chunks.length
+              }
+            }));
+
+            const { error: insertError } = await getSupabase()
+              .from('document_chunks')
+              .insert(rows);
+
+            if (insertError) {
+               throw new Error(`Failed to store chunks: ${insertError.message}`);
+            }
+          }
+
+          await getSupabase().from('documents').update({ status: 'complete' }).eq('id', documentUuid);
+        } catch (e: any) {
+          console.error(`[FILE PROCESS ERR] ${file.name}:`, e);
+        } finally {
+          completedCount++;
+          await getSupabase().from('documents').update({
+            metadata: { progress: Math.min(99, Math.round((completedCount / filesToProcess.length) * 100)) }
+          }).eq('drive_file_id', operationId);
         }
-      }
-
-      await getSupabase().from('documents').update({ status: 'complete' }).eq('id', documentUuid);
-
-      // update operation
-      await getSupabase().from('documents').update({
-        metadata: { progress: Math.round(((i + 1) / files.length) * 100) }
-      }).eq('drive_file_id', operationId);
+      }));
     }
 
     await getSupabase().from('documents').update({
