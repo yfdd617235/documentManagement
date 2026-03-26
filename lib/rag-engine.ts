@@ -344,7 +344,8 @@ async function processImport(operationId: string, corpusName: string, folderId: 
       const chunks = chunkText(content);
       console.log(`Splitting ${file.name} into ${chunks.length} chunks...`);
       
-      const BATCH_SIZE = 50; // Vertex AI limit is 250, but we'll stay safe and efficient
+      // We must stay strictly under the 20,000 token limit of text-embedding-004
+      const BATCH_SIZE = 15;
       for (let j = 0; j < chunks.length; j += BATCH_SIZE) {
         const chunkBatch = chunks.slice(j, j + BATCH_SIZE);
         const embeddings = await getEmbeddingsBatch(chunkBatch);
@@ -423,7 +424,7 @@ export async function retrieveContexts(
   corpusName: string,
   query: string,
   topK: number = 5,
-  distanceThreshold: number = 0.5
+  distanceThreshold: number = 0.8
 ): Promise<RetrievedChunk[]> {
   // 1. Generate Query Embedding
   const queryEmbeddings = await getEmbeddingsBatch([query]);
@@ -432,7 +433,7 @@ export async function retrieveContexts(
   // 2. Search Supabase via RPC
   const { data: matches, error } = await getSupabase().rpc('match_documents', {
     query_embedding: queryEmbedding,
-    match_threshold: 1 - distanceThreshold,
+    match_threshold: Math.max(0.2, 1 - distanceThreshold),
     match_count: Math.max(topK * 2, 20) // Search more to allow filtering
   });
 

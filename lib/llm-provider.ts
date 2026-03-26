@@ -53,8 +53,9 @@ export function getLLM(provider: ProviderType, modelId: string, locationOverride
         googleAuthOptions = { keyFile };
       }
 
-      const location = locationOverride || process.env.VERTEX_AI_LOCATION || 'us-central1';
-      console.log(`[LLM/GCP] createVertex project=${process.env.GOOGLE_CLOUD_PROJECT_ID} location=${location}`);
+      const isProModel = modelId.includes('pro');
+      const location = locationOverride || (isProModel ? 'us-central1' : (process.env.VERTEX_AI_LOCATION || 'us-central1'));
+      console.log(`[LLM/GCP] createVertex project=${process.env.GOOGLE_CLOUD_PROJECT_ID} location=${location} modelId=${modelId}`);
       
       const vertex = createVertex({
         project: process.env.GOOGLE_CLOUD_PROJECT_ID as string,
