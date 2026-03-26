@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
     // 4. Use LLM to extract entities
     const settings = await getUserSettings(token.sub);
     const provider = settings?.llm_provider ?? 'gemini';
-    let modelId = settings?.llm_model ?? 'gemini-2.5-flash'; // High capacity for large docs
+    let modelId = settings?.llm_model ?? 'gemini-1.5-flash'; // Stable and fast
     
     const llmChain = getFallbackChain(provider as any, modelId);
     

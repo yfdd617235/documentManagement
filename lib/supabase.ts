@@ -22,34 +22,46 @@ export async function getCorpusForUser(userId: string): Promise<CorpusRecord | n
   const db = getClient();
   if (!db) return null;
 
-  const { data, error } = await db
-    .from('rag_corpora')
-    .select('*')
-    .eq('user_id', userId)
-    .single();
+  try {
+    const { data, error } = await db
+      .from('rag_corpora')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
 
-  if (error) return null;
-  return data as CorpusRecord;
+    if (error) return null;
+    return data as CorpusRecord;
+  } catch {
+    return null; // Table may not be in PostgREST schema cache
+  }
 }
 
 export async function upsertCorpus(record: Omit<CorpusRecord, 'id'>): Promise<void> {
   const db = getClient();
   if (!db) return;
 
-  await db.from('rag_corpora').upsert(
-    { ...record, last_sync: new Date().toISOString() },
-    { onConflict: 'user_id' }
-  );
+  try {
+    await db.from('rag_corpora').upsert(
+      { ...record, last_sync: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+  } catch (e) {
+    console.warn('[Supabase] upsertCorpus failed (table may not be in schema cache):', e);
+  }
 }
 
 export async function updateCorpusSyncTime(userId: string): Promise<void> {
   const db = getClient();
   if (!db) return;
 
-  await db
-    .from('rag_corpora')
-    .update({ last_sync: new Date().toISOString() })
-    .eq('user_id', userId);
+  try {
+    await db
+      .from('rag_corpora')
+      .update({ last_sync: new Date().toISOString() })
+      .eq('user_id', userId);
+  } catch (e) {
+    console.warn('[Supabase] updateCorpusSyncTime failed:', e);
+  }
 }
 
 // ─── User Settings (PASO 3) ──────────────────────────────────────────────────
@@ -58,13 +70,17 @@ export async function getUserSettings(userId: string): Promise<UserSettings | nu
   const db = getClient();
   if (!db) return null;
 
-  const { data } = await db
-    .from('user_settings')
-    .select('*')
-    .eq('user_id', userId)
-    .single();
+  try {
+    const { data } = await db
+      .from('user_settings')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
 
-  return data as UserSettings | null;
+    return data as UserSettings | null;
+  } catch {
+    return null; // Table may not be in PostgREST schema cache
+  }
 }
 
 export async function upsertUserSettings(
@@ -75,10 +91,14 @@ export async function upsertUserSettings(
   const db = getClient();
   if (!db) return;
 
-  await db.from('user_settings').upsert(
-    { user_id: userId, llm_provider: provider, llm_model: model, updated_at: new Date().toISOString() },
-    { onConflict: 'user_id' }
-  );
+  try {
+    await db.from('user_settings').upsert(
+      { user_id: userId, llm_provider: provider, llm_model: model, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' }
+    );
+  } catch (e) {
+    console.warn('[Supabase] upsertUserSettings failed:', e);
+  }
 }
 
 // ─── Operation Logs (PASO 5) ─────────────────────────────────────────────────

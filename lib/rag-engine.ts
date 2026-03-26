@@ -11,6 +11,11 @@ import { createClient } from '@supabase/supabase-js';
 import { VertexAI } from '@google-cloud/vertexai';
 import type { RetrievedChunk, ImportOperationStatus } from '@/types';
 
+// ─── In-Memory Operation Tracking ─────────────────────────────────────────────
+// Replaces the 'import_operations' table which has PostgREST cache issues.
+// Safe for Vercel: import process + polling share the same Node.js process lifetime.
+const _operationsMap = new Map<string, { status: string; progress: number; error?: string }>();
+
 // ─── Environment & Clients ────────────────────────────────────────────────────
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -199,15 +204,10 @@ function chunkText(text: string, size = 2000, overlap = 200): string[] {
 }
 
 export async function importDriveFolder(corpusName: string, folderId: string, accessToken: string): Promise<string> {
-  // In a real server environment, this should be a background job (BullMQ, Inngest, etc.)
-  // For this migration, we'll use a Supabase operation table to simulate polling.
   const operationId = `op-${Date.now()}`;
   
-  await getSupabase().from('import_operations').insert({
-    name: operationId,
-    status: 'RUNNING',
-    progress: 0
-  });
+  // Track in memory (no DB dependency)
+  _operationsMap.set(operationId, { status: 'RUNNING', progress: 0 });
 
   // Start background process (don't await)
   processImport(operationId, corpusName, folderId, accessToken).catch(console.error);
@@ -248,17 +248,43 @@ async function processImport(operationId: string, corpusName: string, folderId: 
     } catch (e) {
       console.warn('Could not fetch folder name', e);
     }
+    
+    // Recursive file discovery helper
+    const getAllFilesRecursive = async (fid: string): Promise<any[]> => {
+      const res = await fetchWithRetry(
+        `https://www.googleapis.com/drive/v3/files?q='${fid}' in parents and trashed=false&fields=files(id,name,mimeType)&supportsAllDrives=true&includeItemsFromAllDrives=true`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      const items = res.files || [];
+      let allFiles: any[] = [];
+      for (const item of items) {
+        if (item.mimeType === 'application/vnd.google-apps.folder') {
+          console.log(`Found subfolder: ${item.name} (ID: ${item.id}). Scanning...`);
+          const subFiles = await getAllFilesRecursive(item.id);
+          allFiles = allFiles.concat(subFiles);
+        } else {
+          allFiles.push(item);
+        }
+      }
+      return allFiles;
+    };
 
-    // 1. List files in Drive folder using User's Token (NOT ADC)
-    const listRes = await fetchWithRetry(
-      `https://www.googleapis.com/drive/v3/files?q='${folderId}' in parents and trashed=false&fields=files(id,name,mimeType)&supportsAllDrives=true&includeItemsFromAllDrives=true`,
-      { headers: { Authorization: `Bearer ${accessToken}` } }
-    );
-    const files = listRes.files || [];
+    const files = await getAllFilesRecursive(folderId);
+    console.log(`Discovery complete. Found ${files.length} total items in tree.`);
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.mimeType !== 'application/pdf') continue;
+      let mimeType = file.mimeType;
+      
+      // Support for Google Docs/Sheets (Export to PDF)
+      const isGSuite = mimeType.startsWith('application/vnd.google-apps.');
+      const isNativePdf = mimeType === 'application/pdf';
+      
+      if (!isNativePdf && !isGSuite) {
+        console.log(`Skipping non-compatible file: ${file.name} (${mimeType})`);
+        continue;
+      }
+      console.log(`Processing file: ${file.name} (ID: ${file.id})`);
 
       // 2. [Upsert] Document record
       const { data: docRecord, error: docError } = await getSupabase()
@@ -280,9 +306,40 @@ async function processImport(operationId: string, corpusName: string, folderId: 
 
       const documentUuid = docRecord.id;
 
-      // 3. Download/Parse (Simplified)
-      const content = `Content of ${file.name} (Extracted via simulation for migration)`; 
+      // 3. Download/Parse (NOW REAL)
+      let content = '';
+      try {
+        let downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+        
+        // Use Export API for GSuite files
+        if (isGSuite) {
+          downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}/export?mimeType=application/pdf`;
+        }
+
+        const downloadRes = await fetch(downloadUrl, {
+          headers: { Authorization: `Bearer ${accessToken}` }
+        });
+        if (!downloadRes.ok) throw new Error(`Failed download: ${downloadRes.status}`);
+        
+        const buffer = Buffer.from(await downloadRes.arrayBuffer());
+        const pdf = (await import('pdf-parse')).default;
+        const parsed = await pdf(buffer);
+        content = parsed.text;
+        
+        if (!content || content.trim().length === 0) {
+          throw new Error('PDF yielded no text content');
+        }
+      } catch (e: any) {
+        console.error(`[PDF PARSE ERROR] ${file.name}:`, e.message);
+        await getSupabase().from('documents').update({ 
+          status: 'error', 
+          metadata: { ...((docRecord.metadata as any) || {}), error: e.message } 
+        }).eq('id', documentUuid);
+        continue;
+      }
+
       const chunks = chunkText(content);
+      console.log(`Splitting ${file.name} into ${chunks.length} chunks...`);
       
       for (let j = 0; j < chunks.length; j++) {
         const embedding = await getEmbedding(chunks[j]);
@@ -292,7 +349,7 @@ async function processImport(operationId: string, corpusName: string, folderId: 
           document_id: documentUuid,
           content: chunks[j],
           embedding,
-          context: {
+          metadata: {
             file_name: file.name,
             file_id: file.id,
             chunk_index: j,
@@ -307,36 +364,32 @@ async function processImport(operationId: string, corpusName: string, folderId: 
 
       await getSupabase().from('documents').update({ status: 'complete' }).eq('id', documentUuid);
 
-      await getSupabase().from('import_operations').update({
+      _operationsMap.set(operationId, {
+        status: 'RUNNING',
         progress: Math.round(((i + 1) / files.length) * 100)
-      }).eq('name', operationId);
+      });
     }
 
-    await getSupabase().from('import_operations').update({
-      status: 'DONE',
-      progress: 100
-    }).eq('name', operationId);
+    _operationsMap.set(operationId, { status: 'DONE', progress: 100 });
+    console.log(`[RAG IMPORT] Operation ${operationId} completed successfully.`);
 
   } catch (error: any) {
     console.error('[RAG IMPORT ERROR]', error);
-    await getSupabase().from('import_operations').update({
+    _operationsMap.set(operationId, {
       status: 'FAILED',
+      progress: 0,
       error: error.message
-    }).eq('name', operationId);
+    });
   }
 }
 
 export async function pollImportOperation(operationName: string): Promise<ImportOperationStatus> {
-  const { data: op } = await getSupabase()
-    .from('import_operations')
-    .select('*')
-    .eq('name', operationName)
-    .single();
+  const op = _operationsMap.get(operationName);
   
   if (!op) return { name: operationName, status: 'FAILED', error: 'Operation not found' };
   
   return {
-    name: op.name,
+    name: operationName,
     status: op.status as any,
     progress: op.progress,
     error: op.error

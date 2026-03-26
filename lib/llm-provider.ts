@@ -108,11 +108,11 @@ export function getFallbackChain(
   // 4. Last resort: Gemini Flash in us-central1 (if not already the primary)
   if (primaryProvider !== 'gemini' || primaryLocation !== 'us-central1') {
     try {
-      chain.push(getLLM('gemini', 'gemini-2.0-flash', 'us-central1'));
+      chain.push(getLLM('gemini', 'gemini-1.5-flash', 'us-central1'));
     } catch {}
   }
 
-  return chain.length > 0 ? chain : [getLLM('gemini', 'gemini-2.0-flash', 'us-central1')];
+  return chain.length > 0 ? chain : [getLLM('gemini', 'gemini-1.5-flash', 'us-central1')];
 }
 
 /**
@@ -176,9 +176,8 @@ export async function getOllamaModels(): Promise<ModelOption[]> {
  */
 export function getGeminiBackupModels(): ModelOption[] {
   return [
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'gemini' },
-    { id: 'gemini-3.1-flash', name: 'Gemini 3.1 Flash (Preview)', provider: 'gemini' },
-    { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'gemini' },
-    { id: 'gemini-3.1-pro', name: 'Gemini 3.1 Pro (Preview)', provider: 'gemini' },
+    { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', provider: 'gemini' },
+    { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash (Experimental)', provider: 'gemini' },
+    { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', provider: 'gemini' },
   ];
 }

@@ -38,9 +38,9 @@ export async function POST(req: NextRequest) {
   const provider = settings?.llm_provider ?? 'gemini';
   let modelId = settings?.llm_model ?? 'gemini-2.5-flash';
 
-  // Normalize legacy / deprecated model IDs
-  if (modelId === 'gemini-1.5-flash' || modelId === 'gemini-2.0-flash') {
-    modelId = 'gemini-2.5-flash';
+  // Normalize legacy / deprecated or unavailable experimental model IDs
+  if (modelId.includes('gemini-2.5') || modelId.includes('gemini-2.0') || modelId.includes('gemini-3.1')) {
+    modelId = 'gemini-1.5-flash'; // Fallback to stable production model
   }
 
   const llmChain = getFallbackChain(provider as any, modelId);

@@ -8,9 +8,8 @@ Build a production-grade, highly resilient ("Anti-Fallas") document intelligence
 
 ---
 
-## Core Architecture Principle
-> **DO NOT build what Google already manages.**
-> Prefer Vertex AI RAG Engine + managed services over any custom OCR, embedding, or vector pipeline.
+> **Optimize for Cost & Performance without sacrificing Resilience.**
+> Transitioned from Vertex AI Managed RAG (Spanner) to **Supabase + pgvector** for vector storage and retrieval. This eliminates high fixed costs while maintaining state-of-the-art semantic search.
 > **Design for Zero Downtime:** Wrap all external interactions in multi-region failovers and robust retry loops.
 
 ---
@@ -25,18 +24,19 @@ Build a production-grade, highly resilient ("Anti-Fallas") document intelligence
 ### Backend & Resilience
 - **Vercel Serverless Functions**
 - **Google OAuth 2.0** — Drive access via scoped tokens
-- **Vertex AI RAG Engine** — primary engine: ingestion, OCR, embeddings, retrieval
+- **Supabase + pgvector** — Primary RAG Database for metadata and vector embeddings (HNSW index).
+- **Vertex AI Embeddings** — uses `text-embedding-004` via REST API for cross-region stability.
 - **LLM Provider Layer** — unified OpenAI-compatible interface with Multi-Provider Fallback.
-- **RAG Engine Anti-Fallas Wrapper** — A centralized `fetchWithRetry` utility with exponential backoff handling Google API rate limits (429) and transient errors (500, 503).
+- **RAG Engine (Custom implementation)** — Logic in `lib/rag-engine.ts` using Supabase as the backend.
 
 ### LLM Resilient Provider Layer (priority order)
 To guarantee 100% uptime, the LLM layer iterates through an array of models. If one fails or times out, the next is immediately tested transparently in the background:
 ```
-1. Primary User Choice (e.g. Gemini 2.5 Flash in Primary Region)
-2. Gemini Multi-Region Fallbacks (Europe, US East, US Central, Asia, Australia)
-3. OpenRouter (Cloud models, dynamic lists)
-4. Local Ollama Fallback
-5. Default Hardcoded Gemini Backup
+1. **Primary User Choice** (e.g. Gemini 1.5 Flash in Primary Region)
+2. **Gemini Multi-Region Fallbacks** (Europe, US East, US Central, Asia, Australia)
+3. **OpenRouter** (Claude/Llama models as backup)
+4. **Local Ollama Fallback** (optional development)
+5. **Default Hardcoded Gemini Backup** (Gemini 1.5 Flash in us-central1)
 ```
 
 ---
@@ -47,18 +47,18 @@ To guarantee 100% uptime, the LLM layer iterates through an array of models. If 
 [Mode 1 — Conversational Search]
 User query (natural language)
       ↓
-retrieveContexts API (wrapped in fetchWithRetry) → Top K chunks + metadata
+lib/rag-engine: retrieveContexts API → Vector Search in Supabase (pgvector)
       ↓
 LLM Resilient Pipeline (attempts N providers/regions on failure) → stream
       ↓
 Answer + Sources displayed in UI
 
 [Mode 2 — Reference-Based Classification]
-Reference document ingestion (OCR wrapped in fetchWithRetry)
+Reference document ingestion (OCR: pdf-parse / xlsx)
       ↓
 App extracts entities: PN, SN, materials, codes (Resilient LLM call)
       ↓
-retrieveContexts per entity → scored matches across corpus
+retrieveContexts per entity → scored matches across Supabase corpus
       ↓
 Drive API: copy_file() + create_folder() → new organized folder (Originals untouched)
 ```
@@ -67,24 +67,28 @@ Drive API: copy_file() + create_folder() → new organized folder (Originals unt
 
 ## Critical Implementation Notes
 
+### Supabase Integration
+1. **Tables:** `documents` (metadata), `document_chunks` (vector embeddings + content).
+2. **Vector Search:** Uses `match_documents` RPC with HNSW index for high-speed retrieval.
+3. **Migration:** Moved from Google Cloud Spanner to Supabase to reduce monthly infrastructure costs while maintaining 100% functionality.
+
+### Google Drive Ingestion (Custom Pipeline)
+1. **Discovery:** Recursive file scan using user's OAuth token.
+2. **Parsing:** Real-time PDF parsing (`pdf-parse`) and Excel parsing (`xlsx`).
+3. **Exporting:** Automatic export of Google GSuite files (Docs, Sheets) to PDF for indexing.
+4. **Chunking:** Semantic chunking (approx 2000 chars) with 200 char overlap for better context preservation.
+
 ### Google Cloud Authentication on Vercel
 Standard Google SDKs read a JSON file path. **In serverless environments (Vercel), this fails.**
-*Fix:* We inject the raw service account JSON string into a Vercel Environment Variable (`GOOGLE_APPLICATION_CREDENTIALS_JSON`) and parse it in memory using `google-auth-library` to generate Google Application Default Credentials (ADC) tokens dynamically for REST API calls.
-
-### Google Drive → Vertex AI RAG Engine
-1. Embedding model: `text-embedding-005`
-2. Grant the Vertex AI RAG Data Service Agent `Viewer` access to the Drive folder dynamically.
-3. Import via `rag.import_files()` using `google_drive_source` + `RESOURCE_TYPE_FOLDER` (wrapped in exponential backoff).
-4. Chunking: `chunk_size=512`, `chunk_overlap=100`, `max_embedding_requests_per_min=900`
-5. **Rescue Files API**: Automatically catches PDFs that failed standard Vertex parsing, runs them through Gemini Vision OCR (with retries), and imports the transcription text files to the corpus automatically.
+*Fix:* We inject the raw service account JSON string into a Vercel Environment Variable (`GOOGLE_APPLICATION_CREDENTIALS_JSON`) and parse it in memory.
 
 ---
 
 ## Security & Privacy
-- Never store raw file content in your own DB.
-- Drive scopes: `drive.readonly` for reading, `drive.file` for writing (scoped to app-created files only).
-- Service account credentials in strict server-side memory only (`GOOGLE_APPLICATION_CREDENTIALS_JSON`).
-- One RAG corpus per user — strict isolation.
+- Never store raw file content in your own DB (only chunks for search).
+- Drive scopes: `drive.readonly` for reading, `drive.file` for writing.
+- Service account credentials in strict server-side memory only.
+- One RAG corpus per folder — logical isolation via `original_path` filtering.
 
 ---
 
@@ -92,11 +96,11 @@ Standard Google SDKs read a JSON file path. **In serverless environments (Vercel
 
 ### Phase 1 — Interactive Chat and Core RAG (Completed)
 - Google OAuth + Drive connection
-- RAG Corpus indexing + Conversational search
+- RAG Corpus indexing (Recursive) + Conversational search
 - Reference-based classification and Drive routing
 
-### Phase 2 — Resilience and Armoring "Anti-Fallas" (Completed)
-- Implemented `fetchWithRetry` with exponential backoff for complete RAG engine protection.
-- Built multi-region Gemini failover chains in `lib/llm-provider.ts`.
-- Hardened all core APIs (`chat`, `parse`, `rescue-files`) with zero-downtime retry loops. 
-- Integrated sticky-nav UI for uninterrupted access.
+### Phase 2 — Resilience and Cost Optimization (Completed)
+- **Supabase Migration:** Eliminated high Spanner costs by using pgvector ($0/mo base vs $60+/mo).
+- **Multi-region Failover:** Gemini failover chains in `lib/llm-provider.ts` for 100% uptime.
+- **Robust Indexing:** Recursive Drive navigation with real PDF and GSuite export parsing.
+- **Standardized Skills:** Follows industry-standard patterns seen in `skills.sh`.

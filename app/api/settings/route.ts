@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   if (!isSupabaseConfigured()) {
     return NextResponse.json({
       provider: 'gemini',
-      model: 'gemini-2.5-flash',
+      model: 'gemini-1.5-flash',
     });
   }
 
@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     const settings = await getUserSettings(token.sub);
     return NextResponse.json({
       provider: settings?.llm_provider ?? 'gemini',
-      model: settings?.llm_model ?? 'gemini-2.5-flash',
+      model: settings?.llm_model ?? 'gemini-1.5-flash',
     });
   } catch (err: any) {
     return NextResponse.json({ error: 'Failed to fetch settings' }, { status: 500 });
