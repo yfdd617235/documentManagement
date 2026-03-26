@@ -218,7 +218,7 @@ export async function importDriveFolder(corpusName: string, folderId: string, ac
   return operationId;
 }
 
-async function getEmbedding(text: string): Promise<number[]> {
+async function getEmbeddingsBatch(texts: string[]): Promise<number[][]> {
   const project = process.env.GOOGLE_CLOUD_PROJECT_ID!;
   const location = process.env.VERTEX_AI_LOCATION ?? 'us-central1';
   const token = await getAdcToken();
@@ -231,11 +231,11 @@ async function getEmbedding(text: string): Promise<number[]> {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      instances: [{ content: text }],
+      instances: texts.map(t => ({ content: t })),
     }),
   });
 
-  return data.predictions[0].embeddings.values;
+  return data.predictions.map((p: any) => p.embeddings.values);
 }
 
 async function processImport(operationId: string, corpusName: string, folderId: string, accessToken: string) {
@@ -344,24 +344,30 @@ async function processImport(operationId: string, corpusName: string, folderId: 
       const chunks = chunkText(content);
       console.log(`Splitting ${file.name} into ${chunks.length} chunks...`);
       
-      for (let j = 0; j < chunks.length; j++) {
-        const embedding = await getEmbedding(chunks[j]);
+      const BATCH_SIZE = 50; // Vertex AI limit is 250, but we'll stay safe and efficient
+      for (let j = 0; j < chunks.length; j += BATCH_SIZE) {
+        const chunkBatch = chunks.slice(j, j + BATCH_SIZE);
+        const embeddings = await getEmbeddingsBatch(chunkBatch);
 
-        // 4. Store in Supabase
-        const { error: insertError } = await getSupabase().from('document_chunks').insert({
+        const rows = chunkBatch.map((text, idx) => ({
           document_id: documentUuid,
-          content: chunks[j],
-          embedding,
+          content: text,
+          embedding: embeddings[idx],
           metadata: {
             file_name: file.name,
             file_id: file.id,
-            chunk_index: j,
+            chunk_index: j + idx,
             total_chunks: chunks.length
           }
-        });
+        }));
+
+        const { error: insertError } = await getSupabase()
+          .from('document_chunks')
+          .insert(rows);
+
         if (insertError) {
-          console.error('[SUPABASE INSERT ERROR]', insertError);
-          throw new Error(`Failed to store chunk ${j} of ${file.name}: ${insertError.message}`);
+          console.error('[SUPABASE BULK INSERT ERROR]', insertError);
+          throw new Error(`Failed to store batch of chunks for ${file.name}: ${insertError.message}`);
         }
       }
 
@@ -420,7 +426,8 @@ export async function retrieveContexts(
   distanceThreshold: number = 0.5
 ): Promise<RetrievedChunk[]> {
   // 1. Generate Query Embedding
-  const queryEmbedding = await getEmbedding(query);
+  const queryEmbeddings = await getEmbeddingsBatch([query]);
+  const queryEmbedding = queryEmbeddings[0];
 
   // 2. Search Supabase via RPC
   const { data: matches, error } = await getSupabase().rpc('match_documents', {

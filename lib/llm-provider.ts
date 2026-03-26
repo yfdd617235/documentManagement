@@ -87,32 +87,36 @@ export function getFallbackChain(
     console.error('[LLM/CHAIN] Primary provider init failed:', e);
   }
 
-  // 2. If provider is Gemini, add other healthy regions as immediate fallbacks
+  // 2. If provider is Gemini and model is PRO, add FLASH in same region as immediate backup
+  if (primaryProvider === 'gemini' && primaryModelId.includes('pro')) {
+    chain.push(getLLM('gemini', 'gemini-1.5-flash', primaryLocation));
+  }
+
+  // 3. Fallback to other healthy regions (Flash only for best chance of success)
   if (primaryProvider === 'gemini') {
     for (const loc of HEALTHY_GCP_REGIONS) {
       if (loc !== primaryLocation) {
         try {
-          chain.push(getLLM('gemini', primaryModelId, loc));
+          // Always use Flash for fallback regions to minimize 404s
+          chain.push(getLLM('gemini', 'gemini-1.5-flash', loc));
         } catch {}
       }
     }
   }
 
-  // 3. OpenRouter fallback (generic model)
+  // 4. OpenRouter fallback (generic model)
   if (process.env.OPENROUTER_API_KEY) {
     try {
       chain.push(getLLM('openrouter', 'meta-llama/llama-3.1-8b-instruct'));
     } catch {}
   }
 
-  // 4. Last resort: Gemini Flash in us-central1 (if not already the primary)
-  if (primaryProvider !== 'gemini' || primaryLocation !== 'us-central1') {
-    try {
-      chain.push(getLLM('gemini', 'gemini-1.5-flash', 'us-central1'));
-    } catch {}
-  }
+  // 5. Hardcoded safety net: Gemini Flash in us-central1
+  try {
+    chain.push(getLLM('gemini', 'gemini-1.5-flash', 'us-central1'));
+  } catch {}
 
-  return chain.length > 0 ? chain : [getLLM('gemini', 'gemini-1.5-flash', 'us-central1')];
+  return chain;
 }
 
 /**
